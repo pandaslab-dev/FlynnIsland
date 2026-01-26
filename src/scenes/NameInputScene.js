@@ -2,55 +2,56 @@
 // NAME INPUT SCENE
 // ============================================
 // Player enters their name before selecting a dog
+// Uses HTML input field overlaid on Phaser canvas
 
 class NameInputScene extends Phaser.Scene {
   constructor() {
     super({ key: 'NameInputScene' });
-    this.playerName = '';
+    this.playerName = '';  // Stores the entered name
   }
   
   preload() {
-    // Load the enter name dialog background
+    // Load dialog background image
     this.load.image('enternamedialog', 'misc_assets/enternamedialog.png');
   }
   
   create() {
-    // Set background
+    // Set sky blue background
     this.cameras.main.setBackgroundColor('#87CEEB');
     
-    // Add dialog background
+    // Add dialog background at center of screen
     const dialog = this.add.image(512, 384, 'enternamedialog');
     dialog.setScale(0.6);
     
-    // Create HTML input field
-    // We'll position it in the center of the canvas
+    // Create the HTML text input field
     this.createHTMLInput();
     
-    // Add "Continue" button (starts disabled)
+    // Create "Continue" button (starts disabled/gray)
     this.continueButton = this.add.text(
-      512, 500,
-      'Continue',
+      512, 500,              // Position
+      'Continue',            // Text content
       {
         fontSize: '32px',
         fontFamily: 'Arial, sans-serif',
-        color: '#cccccc',  // Gray when disabled
-        stroke: '#000000',
+        color: '#cccccc',    // Gray when disabled
+        stroke: '#000000',   // Black outline
         strokeThickness: 4,
-        backgroundColor: '#666666',
+        backgroundColor: '#666666',  // Dark gray background
         padding: { x: 20, y: 10 }
       }
     );
-    this.continueButton.setOrigin(0.5);
+    this.continueButton.setOrigin(0.5);  // Center the text on its position
     this.continueButton.setInteractive({ useHandCursor: false });
-    this.continueButton.disableInteractive();  // Start disabled
+    this.continueButton.disableInteractive();  // Can't click until name is entered
     
-    // Button click handler
+    // CLICK handler for Continue button
     this.continueButton.on('pointerdown', () => {
+      // Only proceed if name is valid
       if (this.playerName.trim().length > 0) {
         // Remove HTML input before transitioning
         this.removeHTMLInput();
         
-        // Visual feedback
+        // Visual feedback - quick scale animation
         this.tweens.add({
           targets: this.continueButton,
           scaleX: 0.95,
@@ -59,66 +60,67 @@ class NameInputScene extends Phaser.Scene {
           yoyo: true,
           onComplete: () => {
             // Pass player name to DogSelectScene
-            // (For now, we'll go straight to GameScene)
-            this.scene.start('GameScene', { playerName: this.playerName });
+            // Second parameter is data object that next scene receives in init()
+            this.scene.start('DogSelectScene', { playerName: this.playerName });
           }
         });
       }
     });
   }
   
-    createHTMLInput() {
-    // Create an HTML input element
+  createHTMLInput() {
+    // Phaser doesn't have native text input, so we create an HTML input element
+    // and position it over the canvas
+    
     const inputElement = document.createElement('input');
     inputElement.type = 'text';
     inputElement.id = 'nameInput';
     inputElement.placeholder = 'Your name...';
-    inputElement.maxLength = 15;  // Limit name length
+    inputElement.maxLength = 15;  // Limit name to 15 characters
     
-    // Style the input with transparency
+    // Style the input to look integrated with the dialog
     inputElement.style.position = 'absolute';
     inputElement.style.fontSize = '28px';
     inputElement.style.padding = '32px';
     inputElement.style.width = '300px';
-    inputElement.style.border = 'none'; 
+    inputElement.style.border = 'none';
     inputElement.style.textAlign = 'center';
     inputElement.style.fontFamily = 'Arial, sans-serif';
-    inputElement.style.backgroundColor = 'transparent';      // Transparent background
-    inputElement.style.color = '#000000';                    // White text
-    inputElement.style.outline = 'none';                     // Remove focus outline
+    inputElement.style.backgroundColor = 'transparent';  // See-through background
+    inputElement.style.color = '#000000';                // Black text
+    inputElement.style.outline = 'none';                 // Remove blue focus ring
     
-    // Calculate position (center of canvas, aligned with dialog)
+    // Calculate position to center on canvas
     const canvas = this.game.canvas;
     const canvasRect = canvas.getBoundingClientRect();
-    
-    // Position at center of dialog (y: 384 in Phaser coords)
     inputElement.style.left = `${canvasRect.left + (canvasRect.width / 2) - 175}px`;
-    inputElement.style.top = `${canvasRect.top + 370}px`;  // Centered on dialog
+    inputElement.style.top = `${canvasRect.top + 370}px`;
     
-    // Add to page
+    // Add input to the page
     document.body.appendChild(inputElement);
     
-    // Focus the input automatically
+    // Auto-focus so player can start typing immediately
     inputElement.focus();
     
-    // Listen for input changes
+    // Listen for text input
     inputElement.addEventListener('input', (event) => {
-        this.playerName = event.target.value;
-        this.updateContinueButton();
+      this.playerName = event.target.value;
+      this.updateContinueButton();  // Enable/disable button based on input
     });
     
     // Allow Enter key to submit
     inputElement.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && this.playerName.trim().length > 0) {
-        this.continueButton.emit('pointerdown');
-        }
+      if (event.key === 'Enter' && this.playerName.trim().length > 0) {
+        this.continueButton.emit('pointerdown');  // Trigger click handler
+      }
     });
     
     // Store reference for cleanup
     this.htmlInput = inputElement;
-    }
+  }
   
   removeHTMLInput() {
+    // Clean up HTML element when leaving scene
     if (this.htmlInput && this.htmlInput.parentNode) {
       this.htmlInput.parentNode.removeChild(this.htmlInput);
       this.htmlInput = null;
@@ -126,33 +128,41 @@ class NameInputScene extends Phaser.Scene {
   }
   
   updateContinueButton() {
-    // Enable button if name is valid
+    // Enable or disable Continue button based on input validation
+    
     if (this.playerName.trim().length > 0) {
-      this.continueButton.setStyle({ color: '#ffffff', backgroundColor: '#4CAF50' });
+      // Valid name - enable button
+      this.continueButton.setStyle({ 
+        color: '#ffffff',           // White text
+        backgroundColor: '#4CAF50'  // Green background
+      });
       this.continueButton.setInteractive({ useHandCursor: true });
       
-      // Hover effects when enabled
+      // Add hover effects
       this.continueButton.removeAllListeners('pointerover');
       this.continueButton.removeAllListeners('pointerout');
       
       this.continueButton.on('pointerover', () => {
-        this.continueButton.setStyle({ backgroundColor: '#45a049' });
+        this.continueButton.setStyle({ backgroundColor: '#45a049' });  // Darker green
       });
       
       this.continueButton.on('pointerout', () => {
-        this.continueButton.setStyle({ backgroundColor: '#4CAF50' });
+        this.continueButton.setStyle({ backgroundColor: '#4CAF50' });  // Back to normal
       });
     } else {
-      // Disable button if name is empty
-      this.continueButton.setStyle({ color: '#cccccc', backgroundColor: '#666666' });
+      // Empty name - disable button
+      this.continueButton.setStyle({ 
+        color: '#cccccc',           // Gray text
+        backgroundColor: '#666666'  // Dark gray background
+      });
       this.continueButton.disableInteractive();
       this.continueButton.removeAllListeners('pointerover');
       this.continueButton.removeAllListeners('pointerout');
     }
   }
   
-  // Clean up HTML input if scene is shutdown
+  // Lifecycle method - called when scene is shut down
   shutdown() {
-    this.removeHTMLInput();
+    this.removeHTMLInput();  // Always clean up HTML elements
   }
 }

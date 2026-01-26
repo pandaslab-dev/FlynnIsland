@@ -12,18 +12,30 @@
       justify-content: center;
       align-items: center;
       min-height: 100vh;
-      background-color: #1a1a1a;
+      background-color: #1a1a1a;  /* Dark background around canvas */
+    }
+    
+    /* Style the name input placeholder text */
+    #nameInput::placeholder {
+      color: rgba(0, 0, 0, 0.4);  /* Semi-transparent black */
+      font-style: italic;
     }
   </style>
+  
+  <!-- Load Phaser library from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.js"></script>
 </head>
 <body>
-  <!-- Load scenes BEFORE main.js - Add defer to ensure order -->
-  <script src="src/scenes/TitleScene.js" defer></script>
-  <script src="src/scenes/NameInputScene.js" defer></script>
-  <script src="src/scenes/GameScene.js" defer></script>
+  <!-- 
+    Load all scene files BEFORE main.js
+    Order matters! Each scene class must exist before main.js tries to use it
+  -->
+  <script src="src/scenes/TitleScene.js"></script>
+  <script src="src/scenes/NameInputScene.js"></script>
+  <script src="src/scenes/DogSelectScene.js"></script>
+  <script src="src/scenes/GameScene.js"></script>
   
-  <!-- Main game config -->
-  <script src="src/main.js" defer></script>
+  <!-- Load main config last - this starts the game -->
+  <script src="src/main.js"></script>
 </body>
 </html>
