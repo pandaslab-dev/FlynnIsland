@@ -18,11 +18,12 @@
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.js"></script>
 </head>
 <body>
-  <!-- Load scenes BEFORE main.js -->
-  <script src="src/scenes/TitleScene.js"></script>
-  <script src="src/scenes/GameScene.js"></script>
+  <!-- Load scenes BEFORE main.js - Add defer to ensure order -->
+  <script src="src/scenes/TitleScene.js" defer></script>
+  <script src="src/scenes/NameInputScene.js" defer></script>
+  <script src="src/scenes/GameScene.js" defer></script>
   
   <!-- Main game config -->
-  <script src="src/main.js"></script>
+  <script src="src/main.js" defer></script>
 </body>
 </html>

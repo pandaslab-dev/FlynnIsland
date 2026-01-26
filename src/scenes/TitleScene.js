@@ -63,8 +63,7 @@ class TitleScene extends Phaser.Scene {
         duration: 50,
         yoyo: true,
         onComplete: () => {
-          // Start the GameScene
-          this.scene.start('GameScene');
+          this.scene.start('NameInputScene');
         }
       });
     });

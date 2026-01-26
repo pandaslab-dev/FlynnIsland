@@ -4,7 +4,7 @@
 // The main gameplay - player movement, jump, labels
 
 class GameScene extends Phaser.Scene {
-  constructor() {
+    constructor() {
     super({ key: 'GameScene' });
     
     // Scene-specific properties
@@ -19,13 +19,20 @@ class GameScene extends Phaser.Scene {
     this.isJumping = false;
     this.SPEED = 200;
     
-    // Player data (later will come from previous scenes)
+    // Player data - will be set by init()
     this.playerData = {
-      name: "Panda",
-      dogType: "Remix"
+        name: "Player",     // Default fallback
+        dogType: "Remix"
     };
+    }
+
+// Add this NEW method right after constructor:
+init(data) {
+  // Receive data from previous scene
+  if (data.playerName) {
+    this.playerData.name = data.playerName;
   }
-  
+}
   preload() {
     // Load all dog sprites
     this.load.image('remix_stand', 'sprites/dogs/remix/remix_stand.png');

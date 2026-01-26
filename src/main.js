@@ -9,8 +9,9 @@ const config = {
   backgroundColor: '#1a1a1a',
   pixelArt: true,
   scene: [
-    TitleScene,      // First scene that loads
-    GameScene        // Game scene (starts when Play Now is clicked)
+    TitleScene,         // First scene
+    NameInputScene,     // Name input (MAKE SURE THIS IS HERE)
+    GameScene           // Game scene
   ]
 };
 
