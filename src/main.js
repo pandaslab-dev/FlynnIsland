@@ -1,39 +1,37 @@
 // ============================================
 // PHASER CONFIG
 // ============================================
-// This tells Phaser how to initialize your game
 const config = {
-  type: Phaser.AUTO,              // Use WebGL if available, fall back to Canvas
-  width: 1024,                     // Game canvas width
-  height: 768,                     // Game canvas height
-  backgroundColor: '#87CEEB',      // Sky blue background
-  pixelArt: true,                  // Crisp pixel scaling (good for your 512x512 sprites)
+  type: Phaser.AUTO,
+  width: 1024,
+  height: 768,
+  backgroundColor: '#87CEEB',
+  pixelArt: true,
   scene: {
-    preload: preload,              // Load assets BEFORE game starts
-    create: create,                // Set up game objects ONCE
-    update: update                 // Runs every frame (60 times/sec)
+    preload: preload,
+    create: create,
+    update: update
   }
 };
 
-// Start the game
 const game = new Phaser.Game(config);
 
 // ============================================
 // GAME STATE
 // ============================================
-// These variables live outside the functions so they persist
-let player;                        // The dog sprite
-let cursors;                       // Keyboard arrow keys
-let keys;                          // WASD keys
-const SPEED = 200;                 // Pixels per second
+let player;
+let cursors;
+let keys;
+const SPEED = 200;
+
+// NEW: Jump state tracking
+let isJumping = false;              // Prevents jumping while already jumping
+let spaceKey;                       // Spacebar key object
 
 // ============================================
-// PRELOAD - Load all assets
+// PRELOAD
 // ============================================
 function preload() {
-  // Load Remix's sprites
-  // 'remix_stand' is the key we'll use in code
-  // 'sprites/dogs/remix/remix_stand.png' is the file path
   this.load.image('remix_stand', 'sprites/dogs/remix/remix_stand.png');
   
   this.load.image('remix_walk1', 'sprites/dogs/remix/remix_walk1.png');
@@ -48,30 +46,25 @@ function preload() {
 }
 
 // ============================================
-// CREATE - Set up the game world
+// CREATE
 // ============================================
 function create() {
-  // Add the player sprite at center of screen
-  // this.add.sprite(x, y, textureKey)
   player = this.add.sprite(512, 384, 'remix_stand');
-  
-  // Scale down from 512x512 to something reasonable
   player.setScale(0.3);
   
-  // Create walk animation
-  // This defines a sequence of frames that will loop
+  // Walk animation
   this.anims.create({
-    key: 'walk',                   // Name we'll use to play this animation
+    key: 'walk',
     frames: [
       { key: 'remix_walk1' },
       { key: 'remix_walk2' },
       { key: 'remix_walk3' }
     ],
-    frameRate: 8,                  // 8 frames per second
-    repeat: -1                     // Loop forever
+    frameRate: 8,
+    repeat: -1
   });
   
-  // Create run animation
+  // Run animation
   this.anims.create({
     key: 'run',
     frames: [
@@ -82,34 +75,75 @@ function create() {
     repeat: -1
   });
   
-  // Set up keyboard controls
-  cursors = this.input.keyboard.createCursorKeys();  // Arrow keys
-  keys = this.input.keyboard.addKeys('W,A,S,D');     // WASD
+  // NEW: Jump animation (plays once, doesn't loop)
+  this.anims.create({
+    key: 'jump',
+    frames: [
+      { key: 'remix_jump_up' },
+      { key: 'remix_jump_down' }
+    ],
+    frameRate: 10,
+    repeat: 0                      // Play once (0 = no repeat)
+  });
+  
+  cursors = this.input.keyboard.createCursorKeys();
+  keys = this.input.keyboard.addKeys('W,A,S,D');
+  
+  // NEW: Set up spacebar key
+  spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+  
+  // NEW: Listen for animation complete event
+  // This fires when the jump animation finishes
+  player.on('animationcomplete', (animation) => {
+    if (animation.key === 'jump') {
+      isJumping = false;           // Allow jumping again
+    }
+  });
 }
 
 // ============================================
-// UPDATE - Runs every frame
+// UPDATE
 // ============================================
 function update(time, delta) {
-  // delta = milliseconds since last frame (useful for smooth movement)
+  // NEW: Check for jump input (only if not already jumping)
+  if (Phaser.Input.Keyboard.JustDown(spaceKey) && !isJumping) {
+    isJumping = true;
+    player.play('jump');
+    
+    // Optional: Add a little hop effect using a tween
+    // This makes the dog actually move up and down
+    this.tweens.add({
+      targets: player,
+      y: player.y - 50,            // Jump up 50 pixels
+      duration: 250,               // Take 250ms to go up
+      yoyo: true,                  // Come back down automatically
+      ease: 'Quad.easeOut'         // Smooth jump curve
+    });
+    
+    // Don't process movement during jump
+    return;
+  }
   
-  // Track if player is moving
+  // Skip movement processing if jumping
+  if (isJumping) {
+    return;
+  }
+  
+  // Regular movement code (unchanged)
   let velocityX = 0;
   let velocityY = 0;
   let isMoving = false;
   
-  // Check horizontal movement
   if (keys.A.isDown || cursors.left.isDown) {
     velocityX = -SPEED;
-    player.setFlipX(true);         // Flip sprite to face left
+    player.setFlipX(true);
     isMoving = true;
   } else if (keys.D.isDown || cursors.right.isDown) {
     velocityX = SPEED;
-    player.setFlipX(false);        // Face right (normal)
+    player.setFlipX(false);
     isMoving = true;
   }
   
-  // Check vertical movement
   if (keys.W.isDown || cursors.up.isDown) {
     velocityY = -SPEED;
     isMoving = true;
@@ -118,17 +152,12 @@ function update(time, delta) {
     isMoving = true;
   }
   
-  // Apply movement
-  // delta / 1000 converts milliseconds to seconds for smooth speed
   player.x += velocityX * (delta / 1000);
   player.y += velocityY * (delta / 1000);
   
-  // Update animation based on movement
   if (isMoving) {
-    // Play walk animation (true = don't restart if already playing)
     player.play('walk', true);
   } else {
-    // Stop animation and show standing sprite
     player.anims.stop();
     player.setTexture('remix_stand');
   }
