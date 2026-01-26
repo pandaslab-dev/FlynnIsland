@@ -24,9 +24,18 @@ let cursors;
 let keys;
 const SPEED = 200;
 
-// NEW: Jump state tracking
-let isJumping = false;              // Prevents jumping while already jumping
-let spaceKey;                       // Spacebar key object
+let isJumping = false;
+let spaceKey;
+
+// NEW: Text labels
+let playerNameText;               // Player's name (e.g., "Panda")
+let dogTypeText;                  // Dog breed (e.g., "remix")
+
+// NEW: Player data (later this will come from name/dog select screens)
+const playerData = {
+  name: "panda",                  // Placeholder - will be set in name screen
+  dogType: "remix"                // Placeholder - will be set in dog select
+};
 
 // ============================================
 // PRELOAD
@@ -75,7 +84,7 @@ function create() {
     repeat: -1
   });
   
-  // NEW: Jump animation (plays once, doesn't loop)
+  // Jump animation
   this.anims.create({
     key: 'jump',
     frames: [
@@ -83,20 +92,48 @@ function create() {
       { key: 'remix_jump_down' }
     ],
     frameRate: 10,
-    repeat: 0                      // Play once (0 = no repeat)
+    repeat: 0
   });
+  
+  // NEW: Create player name text (on top)
+  playerNameText = this.add.text(
+    player.x,                      // x position (will update in update())
+    player.y - 100,                // y position (above the dog)
+    playerData.name,               // Text content
+    {
+      fontSize: '24px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000',           // Black outline
+      strokeThickness: 4,          // Outline thickness
+      align: 'center'
+    }
+  );
+  playerNameText.setOrigin(0.5, 0.5);  // Center the text on its position
+  
+  // NEW: Create dog type text (below player name)
+  dogTypeText = this.add.text(
+    player.x,
+    player.y - 75,                 // Below the player name
+    playerData.dogType,
+    {
+      fontSize: '18px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#FFD700',            // Gold color for dog type
+      stroke: '#000000',
+      strokeThickness: 3,
+      align: 'center'
+    }
+  );
+  dogTypeText.setOrigin(0.5, 0.5);
   
   cursors = this.input.keyboard.createCursorKeys();
   keys = this.input.keyboard.addKeys('W,A,S,D');
-  
-  // NEW: Set up spacebar key
   spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
   
-  // NEW: Listen for animation complete event
-  // This fires when the jump animation finishes
   player.on('animationcomplete', (animation) => {
     if (animation.key === 'jump') {
-      isJumping = false;           // Allow jumping again
+      isJumping = false;
     }
   });
 }
@@ -105,31 +142,29 @@ function create() {
 // UPDATE
 // ============================================
 function update(time, delta) {
-  // NEW: Check for jump input (only if not already jumping)
+  // Jump input
   if (Phaser.Input.Keyboard.JustDown(spaceKey) && !isJumping) {
     isJumping = true;
     player.play('jump');
     
-    // Optional: Add a little hop effect using a tween
-    // This makes the dog actually move up and down
     this.tweens.add({
       targets: player,
-      y: player.y - 50,            // Jump up 50 pixels
-      duration: 250,               // Take 250ms to go up
-      yoyo: true,                  // Come back down automatically
-      ease: 'Quad.easeOut'         // Smooth jump curve
+      y: player.y - 50,
+      duration: 250,
+      yoyo: true,
+      ease: 'Quad.easeOut'
     });
     
-    // Don't process movement during jump
     return;
   }
   
-  // Skip movement processing if jumping
   if (isJumping) {
+    // NEW: Update text positions even while jumping
+    updateTextPositions();
     return;
   }
   
-  // Regular movement code (unchanged)
+  // Movement
   let velocityX = 0;
   let velocityY = 0;
   let isMoving = false;
@@ -161,4 +196,18 @@ function update(time, delta) {
     player.anims.stop();
     player.setTexture('remix_stand');
   }
+  
+  // NEW: Update text positions to follow player
+  updateTextPositions();
+}
+
+// ============================================
+// NEW: Helper function to update text positions
+// ============================================
+function updateTextPositions() {
+  // Position player name above the dog
+  playerNameText.setPosition(player.x, player.y - 100);
+  
+  // Position dog type below player name
+  dogTypeText.setPosition(player.x, player.y - 75);
 }
