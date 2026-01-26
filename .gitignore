@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Editor files
+.vscode/
+.idea/
+
+# Future node_modules (when we add npm later)
+node_modules/
+
+# Future server files (when we add Colyseus)
+server/node_modules/
