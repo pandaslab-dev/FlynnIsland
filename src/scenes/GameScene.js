@@ -2,7 +2,6 @@
 // GAME SCENE
 // ============================================
 // The main gameplay - player movement, jump, name/dog labels
-// Receives player name and dog choice from previous scenes
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -22,14 +21,13 @@ class GameScene extends Phaser.Scene {
     
     // Player data - will be set by init()
     this.playerData = {
-      name: "Player",    // Default fallback
-      dogType: "Remix"   // Default fallback
+      name: "Player",
+      dogType: "Remix"
     };
   }
   
   // Receive data from DogSelectScene
   init(data) {
-    // init() runs before preload()
     if (data.playerName) {
       this.playerData.name = data.playerName;
     }
@@ -39,12 +37,12 @@ class GameScene extends Phaser.Scene {
   }
   
   preload() {
-    // Dynamically load the selected dog's sprites
-    // This is more efficient than loading all 4 dogs every time
+    const dogKey = this.playerData.dogType.toLowerCase();
     
-    const dogKey = this.playerData.dogType.toLowerCase();  // "Alice" → "alice"
+    // Load island background
+    this.load.image('island', 'misc_assets/island.png');
     
-    // Load all animation frames for selected dog
+    // Load selected dog's sprites
     this.load.image(`${dogKey}_stand`, `sprites/dogs/${dogKey}/${dogKey}_stand.png`);
     
     this.load.image(`${dogKey}_walk1`, `sprites/dogs/${dogKey}/${dogKey}_walk1.png`);
@@ -59,16 +57,22 @@ class GameScene extends Phaser.Scene {
   }
   
   create() {
-    // Set background
-    this.cameras.main.setBackgroundColor('#87CEEB');
-    
     const dogKey = this.playerData.dogType.toLowerCase();
     
-    // Create player sprite with selected dog
-    this.player = this.add.sprite(512, 384, `${dogKey}_stand`);
+    // Add island background at center of world
+    const island = this.add.image(1024, 1024, 'island');
+    island.setOrigin(0.5, 0.5);
+    
+    // Create player sprite at center of island
+    this.player = this.add.sprite(1024, 1024, `${dogKey}_stand`);
     this.player.setScale(0.3);
     
-    // Create walk animation using selected dog's frames
+    // Set up camera to follow player
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    this.cameras.main.setBounds(0, 0, 2048, 2048);
+    this.cameras.main.setZoom(0.8);
+    
+    // Create animations
     this.anims.create({
       key: 'walk',
       frames: [
@@ -76,11 +80,10 @@ class GameScene extends Phaser.Scene {
         { key: `${dogKey}_walk2` },
         { key: `${dogKey}_walk3` }
       ],
-      frameRate: 8,      // 8 frames per second
-      repeat: -1         // Loop forever
+      frameRate: 8,
+      repeat: -1
     });
     
-    // Create run animation
     this.anims.create({
       key: 'run',
       frames: [
@@ -91,7 +94,6 @@ class GameScene extends Phaser.Scene {
       repeat: -1
     });
     
-    // Create jump animation
     this.anims.create({
       key: 'jump',
       frames: [
@@ -99,34 +101,33 @@ class GameScene extends Phaser.Scene {
         { key: `${dogKey}_jump_down` }
       ],
       frameRate: 10,
-      repeat: 0          // Play once, don't loop
+      repeat: 0
     });
     
-    // Create player name text label (above dog)
+    // Create text labels
     this.playerNameText = this.add.text(
       this.player.x,
       this.player.y - 100,
-      this.playerData.name,  // Player's entered name
+      this.playerData.name,
       {
         fontSize: '24px',
         fontFamily: 'Arial, sans-serif',
-        color: '#ffffff',    // White text
-        stroke: '#000000',   // Black outline for readability
+        color: '#ffffff',
+        stroke: '#000000',
         strokeThickness: 4,
         align: 'center'
       }
     );
-    this.playerNameText.setOrigin(0.5, 0.5);  // Center on position
+    this.playerNameText.setOrigin(0.5, 0.5);
     
-    // Create dog type text label (below player name)
     this.dogTypeText = this.add.text(
       this.player.x,
       this.player.y - 75,
-      this.playerData.dogType,  // Dog name (Alice, Remix, etc.)
+      this.playerData.dogType,
       {
         fontSize: '18px',
         fontFamily: 'Arial, sans-serif',
-        color: '#FFD700',    // Gold color
+        color: '#FFD700',
         stroke: '#000000',
         strokeThickness: 3,
         align: 'center'
@@ -135,63 +136,56 @@ class GameScene extends Phaser.Scene {
     this.dogTypeText.setOrigin(0.5, 0.5);
     
     // Setup keyboard controls
-    this.cursors = this.input.keyboard.createCursorKeys();  // Arrow keys
-    this.keys = this.input.keyboard.addKeys('W,A,S,D');     // WASD keys
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.keys = this.input.keyboard.addKeys('W,A,S,D');
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     
     // Listen for jump animation completion
     this.player.on('animationcomplete', (animation) => {
       if (animation.key === 'jump') {
-        this.isJumping = false;  // Allow jumping again
+        this.isJumping = false;
       }
     });
   }
   
   update(time, delta) {
-    // Runs 60 times per second (game loop)
-    
-    // Check for jump input (spacebar pressed, not held)
+    // Check for jump input
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isJumping) {
       this.isJumping = true;
       this.player.play('jump');
       
-      // Add hop effect - tween the y position
       this.tweens.add({
         targets: this.player,
-        y: this.player.y - 50,  // Jump up 50 pixels
-        duration: 250,           // Take 250ms to jump
-        yoyo: true,              // Automatically come back down
-        ease: 'Quad.easeOut'     // Smooth jump curve
+        y: this.player.y - 50,
+        duration: 250,
+        yoyo: true,
+        ease: 'Quad.easeOut'
       });
       
-      // Update text positions even while jumping
       this.updateTextPositions();
-      return;  // Skip rest of update while jumping
+      return;
     }
     
-    // Skip movement if jumping
     if (this.isJumping) {
       this.updateTextPositions();
       return;
     }
     
-    // Handle movement input
+    // Handle movement
     let velocityX = 0;
     let velocityY = 0;
     let isMoving = false;
     
-    // Check horizontal movement (A/D or Left/Right)
     if (this.keys.A.isDown || this.cursors.left.isDown) {
       velocityX = -this.SPEED;
-      this.player.setFlipX(true);   // Flip sprite to face left
+      this.player.setFlipX(true);
       isMoving = true;
     } else if (this.keys.D.isDown || this.cursors.right.isDown) {
       velocityX = this.SPEED;
-      this.player.setFlipX(false);  // Face right (normal)
+      this.player.setFlipX(false);
       isMoving = true;
     }
     
-    // Check vertical movement (W/S or Up/Down)
     if (this.keys.W.isDown || this.cursors.up.isDown) {
       velocityY = -this.SPEED;
       isMoving = true;
@@ -200,29 +194,21 @@ class GameScene extends Phaser.Scene {
       isMoving = true;
     }
     
-    // Apply movement
-    // delta / 1000 converts milliseconds to seconds for smooth speed
     this.player.x += velocityX * (delta / 1000);
     this.player.y += velocityY * (delta / 1000);
     
-    // Update animation based on movement state
     if (isMoving) {
-      // Play walk animation (true = don't restart if already playing)
       this.player.play('walk', true);
     } else {
-      // Stop animation and show standing sprite
       this.player.anims.stop();
       const dogKey = this.playerData.dogType.toLowerCase();
       this.player.setTexture(`${dogKey}_stand`);
     }
     
-    // Update text positions to follow player
     this.updateTextPositions();
   }
   
   updateTextPositions() {
-    // Keep text labels centered above the player
-    // Called every frame to make labels follow the sprite
     this.playerNameText.setPosition(this.player.x, this.player.y - 100);
     this.dogTypeText.setPosition(this.player.x, this.player.y - 75);
   }
