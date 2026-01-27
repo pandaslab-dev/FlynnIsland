@@ -53,16 +53,33 @@ class GameScene extends Phaser.Scene {
   create() {
     const dogKey = this.playerData.dogType.toLowerCase();
     
+    // Add island background
     const island = this.add.image(1024, 1024, 'island');
     island.setOrigin(0.5, 0.5);
     
-    this.player = this.add.sprite(1024, 1024, `${dogKey}_stand`);
+    // NEW: Set physics world bounds (island boundaries)
+    // The island has some water, so we'll make the bounds smaller than 2048x2048
+    // Adjust these values to match where the beach ends
+    this.physics.world.setBounds(300, 300, 1450, 1150);
+    
+    // NEW: Convert player to physics sprite (was regular sprite)
+    this.player = this.physics.add.sprite(1024, 1024, `${dogKey}_stand`);
     this.player.setScale(0.3);
     
+    // NEW: Enable collision with world bounds
+    this.player.setCollideWorldBounds(true);
+    
+    // NEW: Set collision body size (smaller than sprite for better feel)
+    // This makes collision feel more natural - checks center of dog, not edges
+    this.player.body.setSize(150, 150);  // Adjust based on your preference
+    this.player.body.setOffset(180, 180);  // Center the collision box
+    
+    // Camera setup
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
     this.cameras.main.setBounds(0, 0, 2048, 2048);
     this.cameras.main.setZoom(0.8);
     
+    // Animations
     this.anims.create({
       key: 'walk',
       frames: [
@@ -94,6 +111,7 @@ class GameScene extends Phaser.Scene {
       repeat: 0
     });
     
+    // Text labels
     this.playerNameText = this.add.text(
       this.player.x,
       this.player.y - 100,
@@ -124,6 +142,7 @@ class GameScene extends Phaser.Scene {
     );
     this.dogTypeText.setOrigin(0.5, 0.5);
     
+    // Input
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys = this.input.keyboard.addKeys('W,A,S,D');
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -143,40 +162,33 @@ class GameScene extends Phaser.Scene {
       }
     });
     
-    // NEW: Create emoji button UI
+    // Emoji buttons
     this.createEmoteButtons();
   }
   
-  // NEW: Create on-screen emote buttons
   createEmoteButtons() {
-    // Define emojis in order
     const emojis = ['❤️', '😂', '😭', '😡', '🐾', '❗'];
     
-    // Button dimensions
     const buttonSize = 60;
     const buttonSpacing = 10;
     const totalWidth = (buttonSize * 6) + (buttonSpacing * 5);
     
-    // Starting X position to center buttons
-    const startX = (1024 - totalWidth) / 2;  // Canvas width is 1024
-    const yPosition = 700;  // Near bottom of canvas (768 height)
+    const startX = (1024 - totalWidth) / 2;
+    const yPosition = 700;
     
-    // Create each button
     emojis.forEach((emoji, index) => {
       const xPosition = startX + (index * (buttonSize + buttonSpacing));
       
-      // Create button background (rounded rectangle)
       const buttonBg = this.add.rectangle(
         xPosition,
         yPosition,
         buttonSize,
         buttonSize,
-        0x333333,  // Dark gray
-        0.8        // Slightly transparent
+        0x333333,
+        0.8
       );
-      buttonBg.setStrokeStyle(3, 0xffffff, 0.6);  // White border
+      buttonBg.setStrokeStyle(3, 0xffffff, 0.6);
       
-      // Create emoji text on top of button
       const emojiText = this.add.text(
         xPosition,
         yPosition,
@@ -188,12 +200,10 @@ class GameScene extends Phaser.Scene {
       );
       emojiText.setOrigin(0.5, 0.5);
       
-      // Make button interactive
       buttonBg.setInteractive({ useHandCursor: true });
       
-      // Hover effect - lighten background
       buttonBg.on('pointerover', () => {
-        buttonBg.setFillStyle(0x555555, 0.9);  // Lighter gray
+        buttonBg.setFillStyle(0x555555, 0.9);
         this.tweens.add({
           targets: [buttonBg, emojiText],
           scaleX: 1.1,
@@ -203,9 +213,8 @@ class GameScene extends Phaser.Scene {
         });
       });
       
-      // Hover out - back to normal
       buttonBg.on('pointerout', () => {
-        buttonBg.setFillStyle(0x333333, 0.8);  // Back to dark gray
+        buttonBg.setFillStyle(0x333333, 0.8);
         this.tweens.add({
           targets: [buttonBg, emojiText],
           scaleX: 1.0,
@@ -215,9 +224,7 @@ class GameScene extends Phaser.Scene {
         });
       });
       
-      // Click handler - show emote
       buttonBg.on('pointerdown', () => {
-        // Visual feedback - quick scale down
         this.tweens.add({
           targets: [buttonBg, emojiText],
           scaleX: 0.9,
@@ -227,18 +234,16 @@ class GameScene extends Phaser.Scene {
           ease: 'Power2'
         });
         
-        // Trigger emote
         this.showEmote(emoji);
       });
       
-      // Fix buttons to camera (don't scroll with world)
       buttonBg.setScrollFactor(0);
       emojiText.setScrollFactor(0);
     });
   }
   
   update(time, delta) {
-    // Check for jump
+    // Jump
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isJumping) {
       this.isJumping = true;
       this.player.play('jump');
@@ -260,7 +265,7 @@ class GameScene extends Phaser.Scene {
       return;
     }
     
-    // Check for emote keys
+    // Emote keys
     if (Phaser.Input.Keyboard.JustDown(this.emoteKeys.one)) {
       this.showEmote('❤️');
     } else if (Phaser.Input.Keyboard.JustDown(this.emoteKeys.two)) {
@@ -275,7 +280,7 @@ class GameScene extends Phaser.Scene {
       this.showEmote('❗');
     }
     
-    // Handle movement
+    // NEW: Use physics velocity instead of direct position changes
     let velocityX = 0;
     let velocityY = 0;
     let isMoving = false;
@@ -298,9 +303,10 @@ class GameScene extends Phaser.Scene {
       isMoving = true;
     }
     
-    this.player.x += velocityX * (delta / 1000);
-    this.player.y += velocityY * (delta / 1000);
+    // NEW: Set velocity on physics body (replaces manual position changes)
+    this.player.setVelocity(velocityX, velocityY);
     
+    // Animation
     if (isMoving) {
       this.player.play('walk', true);
     } else {
@@ -343,7 +349,7 @@ class GameScene extends Phaser.Scene {
               targets: this.currentEmote,
               alpha: 0,
               y: this.currentEmote.y - 20,
-              duration: 1500,
+              duration: 500,
               ease: 'Power2',
               onComplete: () => {
                 if (this.currentEmote) {
