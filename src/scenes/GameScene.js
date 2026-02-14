@@ -818,7 +818,7 @@ class GameScene extends Phaser.Scene {
       targets: playerEntity.currentEmote,
       scaleX: 1.2,
       scaleY: 1.2,
-      duration: 150,
+      duration: 450,
       ease: 'Back.easeOut',
       yoyo: true,
       onComplete: () => {
