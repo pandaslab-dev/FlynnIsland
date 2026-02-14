@@ -8,6 +8,7 @@ class NameInputScene extends Phaser.Scene {
   constructor() {
     super({ key: 'NameInputScene' });
     this.playerName = '';  // Stores the entered name
+    this.isMobileInputFocused = false;
   }
   
   preload() {
@@ -89,7 +90,7 @@ class NameInputScene extends Phaser.Scene {
     inputElement.maxLength = 15;  // Limit name to 15 characters
     
     // Style the input to look integrated with the dialog
-    inputElement.style.position = 'absolute';
+    inputElement.style.position = 'fixed';
     inputElement.style.fontSize = '28px';
     inputElement.style.padding = '32px';
     inputElement.style.width = '300px';
@@ -104,9 +105,6 @@ class NameInputScene extends Phaser.Scene {
     // Add input to the page
     document.body.appendChild(inputElement);
     
-    // Auto-focus so player can start typing immediately
-    inputElement.focus();
-    
     // Listen for text input
     inputElement.addEventListener('input', (event) => {
       this.playerName = event.target.value;
@@ -119,6 +117,16 @@ class NameInputScene extends Phaser.Scene {
         this.continueButton.emit('pointerdown');  // Trigger click handler
       }
     });
+
+    inputElement.addEventListener('focus', () => {
+      this.isMobileInputFocused = this.isMobileViewport();
+      this.positionHTMLInput();
+    });
+
+    inputElement.addEventListener('blur', () => {
+      this.isMobileInputFocused = false;
+      this.positionHTMLInput();
+    });
     
     // Store reference for cleanup
     this.htmlInput = inputElement;
@@ -128,15 +136,21 @@ class NameInputScene extends Phaser.Scene {
     };
     
     window.addEventListener('resize', this.repositionInputHandler);
-    window.addEventListener('scroll', this.repositionInputHandler);
     window.addEventListener('orientationchange', this.repositionInputHandler);
     this.scale.on('resize', this.repositionInputHandler);
     
     this.positionHTMLInput();
+
+    // Auto-focus after initial placement
+    inputElement.focus();
   }
   
   positionHTMLInput() {
     if (!this.htmlInput) {
+      return;
+    }
+
+    if (this.isMobileInputFocused && this.isMobileViewport()) {
       return;
     }
     
@@ -156,11 +170,14 @@ class NameInputScene extends Phaser.Scene {
     this.htmlInput.style.left = `${canvasRect.left + ((this.inputWorldX * scaleX) - (responsiveWidth / 2))}px`;
     this.htmlInput.style.top = `${canvasRect.top + (this.inputWorldY * scaleY)}px`;
   }
+
+  isMobileViewport() {
+    return this.scale.height > this.scale.width || window.matchMedia('(pointer: coarse)').matches;
+  }
   
   removeHTMLInput() {
     if (this.repositionInputHandler) {
       window.removeEventListener('resize', this.repositionInputHandler);
-      window.removeEventListener('scroll', this.repositionInputHandler);
       window.removeEventListener('orientationchange', this.repositionInputHandler);
       this.scale.off('resize', this.repositionInputHandler);
       this.repositionInputHandler = null;

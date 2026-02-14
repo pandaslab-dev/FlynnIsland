@@ -45,32 +45,32 @@ class DogSelectScene extends Phaser.Scene {
     // Define dog data and their positions in the grid
     // Positions match the 4 slots in selectdogdialog.png
     const xOffset = isPortraitViewport ? 112 : 120;
-    const yOffset = isPortraitViewport ? 116 : 100;
-    const yShift = isPortraitViewport ? 26 : 22;
+    const topRowY = centerY + (isPortraitViewport ? -72 : -78);
+    const bottomRowY = centerY + (isPortraitViewport ? 118 : 122);
     const dogs = [
       { 
         name: 'Alice',      // Display name (capitalized)
         key: 'alice',       // Asset key (lowercase)
         x: centerX - xOffset,
-        y: centerY - yOffset + yShift
+        y: topRowY
       },
       { 
         name: 'Remix', 
         key: 'remix',
         x: centerX + xOffset,
-        y: centerY - yOffset + yShift
+        y: topRowY
       },
       { 
         name: 'Sapphire', 
         key: 'sapphire',
         x: centerX - xOffset,
-        y: centerY + yOffset + yShift
+        y: bottomRowY
       },
       { 
         name: 'Wendy', 
         key: 'wendy',
         x: centerX + xOffset,
-        y: centerY + yOffset + yShift
+        y: bottomRowY
       }
     ];
     
