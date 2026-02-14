@@ -41,11 +41,15 @@ class GameScene extends Phaser.Scene {
     };
 
     this.worldBounds = {
-      x: 300,
-      y: 300,
-      width: 1450,
-      height: 1150
+      x: 0,
+      y: 0,
+      width: 2048,
+      height: 2048
     };
+
+    this.islandMaskPixels = null;
+    this.islandMaskWidth = 0;
+    this.islandMaskHeight = 0;
 
     this.playerData = {
       name: 'Player',
@@ -64,6 +68,7 @@ class GameScene extends Phaser.Scene {
 
   preload() {
     this.load.image('island', 'misc_assets/island.png');
+    this.load.image('islandedge', 'misc_assets/islandedge.png');
 
     this.DOG_KEYS.forEach((dogKey) => {
       this.loadDogAssets(dogKey);
@@ -85,6 +90,7 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(0.8);
 
     this.createDogAnimations();
+    this.buildIslandCollisionMask();
 
     this.setupNetworkBridge();
 
@@ -137,6 +143,83 @@ class GameScene extends Phaser.Scene {
     this.load.image(`${dogKey}_run2`, `sprites/dogs/${dogKey}/${dogKey}_run2.png`);
     this.load.image(`${dogKey}_jump_up`, `sprites/dogs/${dogKey}/${dogKey}_jump_up.png`);
     this.load.image(`${dogKey}_jump_down`, `sprites/dogs/${dogKey}/${dogKey}_jump_down.png`);
+  }
+
+  buildIslandCollisionMask() {
+    const maskTexture = this.textures.get('islandedge');
+    if (!maskTexture) {
+      return;
+    }
+
+    const sourceImage = maskTexture.getSourceImage();
+    if (!sourceImage || !sourceImage.width || !sourceImage.height) {
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sourceImage.width;
+    canvas.height = sourceImage.height;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      return;
+    }
+
+    ctx.drawImage(sourceImage, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    this.islandMaskPixels = imageData.data;
+    this.islandMaskWidth = canvas.width;
+    this.islandMaskHeight = canvas.height;
+  }
+
+  isBlockedAtWorldPoint(worldX, worldY) {
+    if (!this.islandMaskPixels) {
+      return false;
+    }
+
+    const pixelX = Math.floor(worldX);
+    const pixelY = Math.floor(worldY);
+
+    if (
+      pixelX < 0 ||
+      pixelY < 0 ||
+      pixelX >= this.islandMaskWidth ||
+      pixelY >= this.islandMaskHeight
+    ) {
+      return true;
+    }
+
+    const pixelIndex = ((pixelY * this.islandMaskWidth) + pixelX) * 4;
+    const r = this.islandMaskPixels[pixelIndex];
+    const g = this.islandMaskPixels[pixelIndex + 1];
+    const b = this.islandMaskPixels[pixelIndex + 2];
+    const a = this.islandMaskPixels[pixelIndex + 3];
+
+    if (a === 0) {
+      return false;
+    }
+
+    return r < 12 && g < 12 && b < 12;
+  }
+
+  canPlayerOccupy(worldX, worldY) {
+    const sampleRadius = 34;
+    const points = [
+      { x: worldX, y: worldY },
+      { x: worldX + sampleRadius, y: worldY },
+      { x: worldX - sampleRadius, y: worldY },
+      { x: worldX, y: worldY + sampleRadius },
+      { x: worldX, y: worldY - sampleRadius }
+    ];
+
+    for (const point of points) {
+      if (this.isBlockedAtWorldPoint(point.x, point.y)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   createDogAnimations() {
@@ -263,7 +346,7 @@ class GameScene extends Phaser.Scene {
         `${dogKey}_stand`
       );
       sprite.setScale(0.3);
-      sprite.setCollideWorldBounds(true);
+      sprite.setCollideWorldBounds(false);
       sprite.body.setSize(150, 150);
       sprite.body.setOffset(180, 180);
 
@@ -473,6 +556,7 @@ class GameScene extends Phaser.Scene {
         0.8
       );
       buttonBg.setStrokeStyle(3, 0xffffff, 0.6);
+      buttonBg.setDepth(3000);
 
       const emojiText = this.add.text(
         xPosition,
@@ -484,6 +568,7 @@ class GameScene extends Phaser.Scene {
         }
       );
       emojiText.setOrigin(0.5, 0.5);
+      emojiText.setDepth(3001);
 
       buttonBg.setInteractive({ useHandCursor: true });
 
@@ -723,10 +808,18 @@ class GameScene extends Phaser.Scene {
       this.moveVector.copy(this.joystickVector);
     }
 
-    localPlayer.sprite.setVelocity(
-      this.moveVector.x * this.SPEED,
-      this.moveVector.y * this.SPEED
-    );
+    localPlayer.sprite.setVelocity(0, 0);
+
+    const moveStep = this.SPEED * (delta / 1000);
+    const targetX = localPlayer.sprite.x + (this.moveVector.x * moveStep);
+    const targetY = localPlayer.sprite.y + (this.moveVector.y * moveStep);
+
+    if (this.canPlayerOccupy(targetX, localPlayer.sprite.y)) {
+      localPlayer.sprite.x = targetX;
+    }
+    if (this.canPlayerOccupy(localPlayer.sprite.x, targetY)) {
+      localPlayer.sprite.y = targetY;
+    }
 
     const isMoving = this.moveVector.lengthSq() > 0;
 
