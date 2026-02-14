@@ -66,6 +66,9 @@ class NameInputScene extends Phaser.Scene {
         });
       }
     });
+    
+    this.events.once('shutdown', this.handleSceneShutdown, this);
+    this.events.once('destroy', this.handleSceneShutdown, this);
   }
   
   createHTMLInput() {
@@ -83,18 +86,13 @@ class NameInputScene extends Phaser.Scene {
     inputElement.style.fontSize = '28px';
     inputElement.style.padding = '32px';
     inputElement.style.width = '300px';
+    inputElement.style.boxSizing = 'border-box';
     inputElement.style.border = 'none';
     inputElement.style.textAlign = 'center';
     inputElement.style.fontFamily = 'Arial, sans-serif';
     inputElement.style.backgroundColor = 'transparent';  // See-through background
     inputElement.style.color = '#000000';                // Black text
     inputElement.style.outline = 'none';                 // Remove blue focus ring
-    
-    // Calculate position to center on canvas
-    const canvas = this.game.canvas;
-    const canvasRect = canvas.getBoundingClientRect();
-    inputElement.style.left = `${canvasRect.left + (canvasRect.width / 2) - 175}px`;
-    inputElement.style.top = `${canvasRect.top + 370}px`;
     
     // Add input to the page
     document.body.appendChild(inputElement);
@@ -117,9 +115,50 @@ class NameInputScene extends Phaser.Scene {
     
     // Store reference for cleanup
     this.htmlInput = inputElement;
+    
+    this.repositionInputHandler = () => {
+      this.positionHTMLInput();
+    };
+    
+    window.addEventListener('resize', this.repositionInputHandler);
+    window.addEventListener('scroll', this.repositionInputHandler);
+    window.addEventListener('orientationchange', this.repositionInputHandler);
+    this.scale.on('resize', this.repositionInputHandler);
+    
+    this.positionHTMLInput();
+  }
+  
+  positionHTMLInput() {
+    if (!this.htmlInput) {
+      return;
+    }
+    
+    const canvasRect = this.game.canvas.getBoundingClientRect();
+    const gameWidth = this.scale.gameSize.width;
+    const gameHeight = this.scale.gameSize.height;
+    const scaleX = canvasRect.width / gameWidth;
+    const scaleY = canvasRect.height / gameHeight;
+    
+    const responsiveWidth = Phaser.Math.Clamp(300 * scaleX, 180, 320);
+    const responsiveFont = Phaser.Math.Clamp(28 * scaleY, 16, 28);
+    const responsivePadding = Phaser.Math.Clamp(32 * scaleY, 12, 32);
+    
+    this.htmlInput.style.width = `${responsiveWidth}px`;
+    this.htmlInput.style.fontSize = `${responsiveFont}px`;
+    this.htmlInput.style.padding = `${responsivePadding}px`;
+    this.htmlInput.style.left = `${canvasRect.left + ((512 * scaleX) - (responsiveWidth / 2))}px`;
+    this.htmlInput.style.top = `${canvasRect.top + (370 * scaleY)}px`;
   }
   
   removeHTMLInput() {
+    if (this.repositionInputHandler) {
+      window.removeEventListener('resize', this.repositionInputHandler);
+      window.removeEventListener('scroll', this.repositionInputHandler);
+      window.removeEventListener('orientationchange', this.repositionInputHandler);
+      this.scale.off('resize', this.repositionInputHandler);
+      this.repositionInputHandler = null;
+    }
+    
     // Clean up HTML element when leaving scene
     if (this.htmlInput && this.htmlInput.parentNode) {
       this.htmlInput.parentNode.removeChild(this.htmlInput);
@@ -164,5 +203,9 @@ class NameInputScene extends Phaser.Scene {
   // Lifecycle method - called when scene is shut down
   shutdown() {
     this.removeHTMLInput();  // Always clean up HTML elements
+  }
+  
+  handleSceneShutdown() {
+    this.removeHTMLInput();
   }
 }

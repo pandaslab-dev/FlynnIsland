@@ -19,6 +19,16 @@ class GameScene extends Phaser.Scene {
     
     this.currentEmote = null;
     this.emoteKeys = null;
+    this.moveVector = new Phaser.Math.Vector2(0, 0);
+    
+    this.joystickBase = null;
+    this.joystickThumb = null;
+    this.joystickPointerId = null;
+    this.joystickMaxDistance = 70;
+    this.joystickVector = new Phaser.Math.Vector2(0, 0);
+    
+    this.jumpButton = null;
+    this.mobileJumpRequested = false;
     
     this.playerData = {
       name: "Player",
@@ -164,6 +174,9 @@ class GameScene extends Phaser.Scene {
     
     // Emoji buttons
     this.createEmoteButtons();
+    
+    // Mobile controls
+    this.createMobileControls();
   }
   
   createEmoteButtons() {
@@ -242,9 +255,136 @@ class GameScene extends Phaser.Scene {
     });
   }
   
+  createMobileControls() {
+    const isTouchDevice = this.sys.game.device.input.touch;
+    if (!isTouchDevice) {
+      return;
+    }
+    
+    this.input.addPointer(2);
+    
+    const joystickX = 140;
+    const joystickY = 620;
+    
+    this.joystickBase = this.add.circle(joystickX, joystickY, 80, 0x222222, 0.35);
+    this.joystickBase.setStrokeStyle(3, 0xffffff, 0.35);
+    this.joystickBase.setScrollFactor(0);
+    this.joystickBase.setDepth(1000);
+    
+    this.joystickThumb = this.add.circle(joystickX, joystickY, 40, 0xffffff, 0.55);
+    this.joystickThumb.setScrollFactor(0);
+    this.joystickThumb.setDepth(1001);
+    
+    this.jumpButton = this.add.circle(900, 620, 60, 0x4CAF50, 0.5);
+    this.jumpButton.setStrokeStyle(3, 0xffffff, 0.6);
+    this.jumpButton.setScrollFactor(0);
+    this.jumpButton.setDepth(1000);
+    this.jumpButton.setInteractive({ useHandCursor: false });
+    
+    const jumpLabel = this.add.text(900, 620, 'JUMP', {
+      fontSize: '22px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 3
+    });
+    jumpLabel.setOrigin(0.5, 0.5);
+    jumpLabel.setScrollFactor(0);
+    jumpLabel.setDepth(1001);
+    
+    this.jumpButton.on('pointerdown', () => {
+      this.mobileJumpRequested = true;
+      this.jumpButton.setFillStyle(0x66BB6A, 0.75);
+    });
+    
+    this.jumpButton.on('pointerup', () => {
+      this.jumpButton.setFillStyle(0x4CAF50, 0.5);
+    });
+    
+    this.jumpButton.on('pointerout', () => {
+      this.jumpButton.setFillStyle(0x4CAF50, 0.5);
+    });
+    
+    this.input.on('pointerdown', (pointer) => {
+      if (this.joystickPointerId !== null) {
+        return;
+      }
+      
+      if (pointer.x > this.scale.width / 2) {
+        return;
+      }
+      
+      const distanceFromBase = Phaser.Math.Distance.Between(
+        pointer.x,
+        pointer.y,
+        this.joystickBase.x,
+        this.joystickBase.y
+      );
+      if (distanceFromBase > 140) {
+        return;
+      }
+      
+      this.joystickPointerId = pointer.id;
+      this.updateJoystick(pointer);
+    });
+    
+    this.input.on('pointermove', (pointer) => {
+      if (pointer.id !== this.joystickPointerId) {
+        return;
+      }
+      
+      this.updateJoystick(pointer);
+    });
+    
+    this.input.on('pointerup', (pointer) => {
+      if (pointer.id !== this.joystickPointerId) {
+        return;
+      }
+      
+      this.resetJoystick();
+    });
+  }
+  
+  updateJoystick(pointer) {
+    if (!this.joystickBase || !this.joystickThumb) {
+      return;
+    }
+    
+    const dx = pointer.x - this.joystickBase.x;
+    const dy = pointer.y - this.joystickBase.y;
+    const distance = Math.sqrt((dx * dx) + (dy * dy));
+    const clampedDistance = Math.min(distance, this.joystickMaxDistance);
+    
+    let angle = 0;
+    if (distance > 0) {
+      angle = Math.atan2(dy, dx);
+    }
+    
+    this.joystickThumb.x = this.joystickBase.x + (Math.cos(angle) * clampedDistance);
+    this.joystickThumb.y = this.joystickBase.y + (Math.sin(angle) * clampedDistance);
+    
+    if (distance < 6) {
+      this.joystickVector.set(0, 0);
+      return;
+    }
+    
+    const strength = clampedDistance / this.joystickMaxDistance;
+    this.joystickVector.set(Math.cos(angle) * strength, Math.sin(angle) * strength);
+  }
+  
+  resetJoystick() {
+    this.joystickPointerId = null;
+    this.joystickVector.set(0, 0);
+    
+    if (this.joystickBase && this.joystickThumb) {
+      this.joystickThumb.x = this.joystickBase.x;
+      this.joystickThumb.y = this.joystickBase.y;
+    }
+  }
+  
   update(time, delta) {
     // Jump
-    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isJumping) {
+    if ((Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.mobileJumpRequested) && !this.isJumping) {
       this.isJumping = true;
       this.player.play('jump');
       
@@ -257,8 +397,10 @@ class GameScene extends Phaser.Scene {
       });
       
       this.updateTextPositions();
+      this.mobileJumpRequested = false;
       return;
     }
+    this.mobileJumpRequested = false;
     
     if (this.isJumping) {
       this.updateTextPositions();
@@ -281,30 +423,44 @@ class GameScene extends Phaser.Scene {
     }
     
     // NEW: Use physics velocity instead of direct position changes
-    let velocityX = 0;
-    let velocityY = 0;
-    let isMoving = false;
+    this.moveVector.set(0, 0);
     
     if (this.keys.A.isDown || this.cursors.left.isDown) {
-      velocityX = -this.SPEED;
-      this.player.setFlipX(true);
-      isMoving = true;
-    } else if (this.keys.D.isDown || this.cursors.right.isDown) {
-      velocityX = this.SPEED;
-      this.player.setFlipX(false);
-      isMoving = true;
+      this.moveVector.x = -1;
+    }
+    if (this.keys.D.isDown || this.cursors.right.isDown) {
+      this.moveVector.x = 1;
     }
     
     if (this.keys.W.isDown || this.cursors.up.isDown) {
-      velocityY = -this.SPEED;
-      isMoving = true;
-    } else if (this.keys.S.isDown || this.cursors.down.isDown) {
-      velocityY = this.SPEED;
-      isMoving = true;
+      this.moveVector.y = -1;
+    }
+    if (this.keys.S.isDown || this.cursors.down.isDown) {
+      this.moveVector.y = 1;
+    }
+    
+    if (this.moveVector.lengthSq() > 0) {
+      this.moveVector.normalize();
+    }
+    
+    // Touch joystick overrides keyboard direction when active.
+    if (this.joystickVector.lengthSq() > 0) {
+      this.moveVector.copy(this.joystickVector);
     }
     
     // NEW: Set velocity on physics body (replaces manual position changes)
-    this.player.setVelocity(velocityX, velocityY);
+    this.player.setVelocity(
+      this.moveVector.x * this.SPEED,
+      this.moveVector.y * this.SPEED
+    );
+    
+    const isMoving = this.moveVector.lengthSq() > 0;
+    
+    if (this.moveVector.x < -0.05) {
+      this.player.setFlipX(true);
+    } else if (this.moveVector.x > 0.05) {
+      this.player.setFlipX(false);
+    }
     
     // Animation
     if (isMoving) {
