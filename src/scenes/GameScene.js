@@ -51,6 +51,18 @@ class GameScene extends Phaser.Scene {
     this.islandMaskWidth = 0;
     this.islandMaskHeight = 0;
 
+    this.ballSprite = null;
+    this.ballState = {
+      x: 1024,
+      y: 820,
+      targetX: 1024,
+      targetY: 820,
+      vx: 0,
+      vy: 0,
+      hasServerSnapshot: false
+    };
+    this.BALL_SCALE = 0.18;
+
     this.playerData = {
       name: 'Player',
       dogType: 'Remix'
@@ -69,6 +81,7 @@ class GameScene extends Phaser.Scene {
   preload() {
     this.load.image('island', 'misc_assets/island.png');
     this.load.image('islandedge', 'misc_assets/islandedge.png');
+    this.load.image('ball', 'misc_assets/ball.png');
 
     this.DOG_KEYS.forEach((dogKey) => {
       this.loadDogAssets(dogKey);
@@ -91,6 +104,7 @@ class GameScene extends Phaser.Scene {
 
     this.createDogAnimations();
     this.buildIslandCollisionMask();
+    this.createBall();
 
     this.setupNetworkBridge();
 
@@ -171,6 +185,33 @@ class GameScene extends Phaser.Scene {
     this.islandMaskPixels = imageData.data;
     this.islandMaskWidth = canvas.width;
     this.islandMaskHeight = canvas.height;
+  }
+
+  createBall() {
+    this.ballSprite = this.add.image(
+      this.ballState.x,
+      this.ballState.y,
+      'ball'
+    );
+    this.ballSprite.setScale(this.BALL_SCALE);
+    this.ballSprite.setDepth(60);
+  }
+
+  applyBallState(ballSnapshot) {
+    if (!ballSnapshot || !Number.isFinite(ballSnapshot.x) || !Number.isFinite(ballSnapshot.y)) {
+      return;
+    }
+
+    this.ballState.targetX = ballSnapshot.x;
+    this.ballState.targetY = ballSnapshot.y;
+    this.ballState.vx = Number.isFinite(ballSnapshot.vx) ? ballSnapshot.vx : 0;
+    this.ballState.vy = Number.isFinite(ballSnapshot.vy) ? ballSnapshot.vy : 0;
+
+    if (this.ballSprite && !this.ballState.hasServerSnapshot) {
+      this.ballSprite.setPosition(this.ballState.targetX, this.ballState.targetY);
+    }
+
+    this.ballState.hasServerSnapshot = true;
   }
 
   isBlockedAtWorldPoint(worldX, worldY) {
@@ -445,6 +486,10 @@ class GameScene extends Phaser.Scene {
   }
 
   applyWorldState(worldState) {
+    if (worldState && typeof worldState === 'object' && worldState.ball) {
+      this.applyBallState(worldState.ball);
+    }
+
     const playersSnapshot = Array.isArray(worldState)
       ? worldState
       : Array.isArray(worldState?.players)
@@ -767,6 +812,7 @@ class GameScene extends Phaser.Scene {
   update(time, delta) {
     const localPlayer = this.getLocalPlayer();
     if (!localPlayer) {
+      this.interpolateBall(delta);
       return;
     }
 
@@ -784,6 +830,7 @@ class GameScene extends Phaser.Scene {
 
       this.mobileJumpRequested = false;
       this.updateAllPlayerDecorations();
+      this.interpolateBall(delta);
       this.sendNetworkInput(time, 'jump', true);
       return;
     }
@@ -792,6 +839,7 @@ class GameScene extends Phaser.Scene {
     if (this.isJumping) {
       this.updateAllPlayerDecorations();
       this.interpolateRemotePlayers(delta);
+      this.interpolateBall(delta);
       return;
     }
 
@@ -861,6 +909,7 @@ class GameScene extends Phaser.Scene {
     }
 
     this.interpolateRemotePlayers(delta);
+    this.interpolateBall(delta);
     this.updateAllPlayerDecorations();
 
     this.sendNetworkInput(time, isMoving ? 'walk' : 'stand');
@@ -879,6 +928,21 @@ class GameScene extends Phaser.Scene {
         playerEntity.sprite.y = Phaser.Math.Linear(playerEntity.sprite.y, playerEntity.targetY, smoothing);
       }
     });
+  }
+
+  interpolateBall(delta) {
+    if (!this.ballSprite) {
+      return;
+    }
+
+    const smoothing = Phaser.Math.Clamp((delta / 1000) * 14, 0, 1);
+
+    this.ballSprite.x = Phaser.Math.Linear(this.ballSprite.x, this.ballState.targetX, smoothing);
+    this.ballSprite.y = Phaser.Math.Linear(this.ballSprite.y, this.ballState.targetY, smoothing);
+
+    const speed = Math.sqrt((this.ballState.vx * this.ballState.vx) + (this.ballState.vy * this.ballState.vy));
+    const rollDirection = this.ballState.vx < 0 ? -1 : 1;
+    this.ballSprite.rotation += ((speed / 650) * (delta / 16.6667)) * 0.08 * rollDirection;
   }
 
   sendNetworkInput(time, animationState, force = false) {
@@ -995,5 +1059,10 @@ class GameScene extends Phaser.Scene {
 
     this.players = {};
     this.resetJoystick();
+
+    if (this.ballSprite) {
+      this.ballSprite.destroy();
+      this.ballSprite = null;
+    }
   }
 }
