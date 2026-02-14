@@ -572,6 +572,8 @@ class GameScene extends Phaser.Scene {
         emoji,
         {
           fontSize: '36px',
+          stroke: '#ffffff',
+          strokeThickness: 4,
           align: 'center'
         }
       );
@@ -930,6 +932,8 @@ class GameScene extends Phaser.Scene {
       emoji,
       {
         fontSize: '48px',
+        stroke: '#ffffff',
+        strokeThickness: 6,
         align: 'center'
       }
     );
