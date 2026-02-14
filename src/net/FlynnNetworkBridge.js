@@ -26,7 +26,7 @@ class FlynnNetworkBridge {
 
     const socketServerUrl = isLocalHost
       ? 'http://localhost:3000'
-      : 'https://api.flynnisland.pandaslab.dev';
+      : 'https://flynnisland.pandaslab.dev';
 
     this.socket = window.io(socketServerUrl);
 
