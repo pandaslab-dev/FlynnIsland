@@ -15,6 +15,15 @@ const SPAWN_Y = 1024;
 const WORLD_WIDTH = 2048;
 const WORLD_HEIGHT = 2048;
 const ISLAND_MASK_PATH = path.resolve(__dirname, '..', 'misc_assets', 'islandedge.png');
+const ROOT_DIR = path.resolve(__dirname, '..');
+const INDEX_HTML_PATH = path.join(ROOT_DIR, 'index.html');
+const INDEX_BUILD_TOKEN = '__BUILD_ID__';
+const BUILD_ID = (
+  process.env.RENDER_GIT_COMMIT ||
+  process.env.SOURCE_VERSION ||
+  process.env.RENDER_SERVICE_ID ||
+  'dev'
+).trim();
 
 const ALLOWED_DOG_TYPES = new Set(['Alice', 'Remix', 'Sapphire', 'Wendy']);
 
@@ -41,8 +50,42 @@ const ball = {
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
+app.use(express.static(ROOT_DIR, {
+  index: false,
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    const relativePath = path.relative(ROOT_DIR, filePath).replace(/\\/g, '/');
 
-app.use(express.static(path.join(__dirname, '..')));
+    if (relativePath === 'index.html' || relativePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return;
+    }
+
+    // Core app logic should never be cached to avoid stale/mixed client versions.
+    if (relativePath.startsWith('src/') && relativePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+      return;
+    }
+
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+  }
+}));
+
+function renderIndexHtml() {
+  const indexTemplate = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  return indexTemplate.split(INDEX_BUILD_TOKEN).join(BUILD_ID);
+}
+
+app.get('/', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.type('html').send(renderIndexHtml());
+});
+
+app.get('/index.html', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.type('html').send(renderIndexHtml());
+});
 
 app.get('/health', (req, res) => {
   res.json({

@@ -11,6 +11,8 @@ class DogSelectScene extends Phaser.Scene {
     this.dialog = null;
     this.dogSlots = [];
     this.resizeHandler = null;
+    this.scenePointerHandler = null;
+    this.selectionLocked = false;
   }
   
   // Receive data from previous scene (NameInputScene)
@@ -75,6 +77,18 @@ class DogSelectScene extends Phaser.Scene {
     this.layoutScene();
     this.resizeHandler = () => this.layoutScene();
     this.scale.on('resize', this.resizeHandler);
+    this.scenePointerHandler = (pointer, currentlyOver) => {
+      if (this.selectionLocked) {
+        return;
+      }
+
+      if (Array.isArray(currentlyOver) && currentlyOver.length > 0) {
+        return;
+      }
+
+      this.trySelectSlotAt(pointer.x, pointer.y);
+    };
+    this.input.on('pointerdown', this.scenePointerHandler);
 
     this.events.once('shutdown', this.handleSceneShutdown, this);
     this.events.once('destroy', this.handleSceneShutdown, this);
@@ -100,6 +114,7 @@ class DogSelectScene extends Phaser.Scene {
       dogData,
       sprite: dogSprite,
       clickZone,
+      hitRadius: 100,
       scales: {
         base: 0.25,
         hover: 0.28,
@@ -109,6 +124,7 @@ class DogSelectScene extends Phaser.Scene {
     
     // Make the invisible rectangle interactive
     clickZone.setInteractive({ useHandCursor: true });
+    dogSprite.setInteractive({ useHandCursor: true });
     
     // HOVER IN - scale up dog sprite for feedback
     clickZone.on('pointerover', () => {
@@ -134,24 +150,63 @@ class DogSelectScene extends Phaser.Scene {
     
     // CLICK - select this dog and start game
     clickZone.on('pointerdown', () => {
-      // Visual feedback - quick scale down
-      this.tweens.add({
-        targets: slot.sprite,
-        scaleX: slot.scales.pressed,
-        scaleY: slot.scales.pressed,
-        duration: 50,
-        yoyo: true,
-        onComplete: () => {
-          // Start GameScene and pass BOTH player name AND selected dog
-          this.scene.start('GameScene', { 
-            playerName: this.playerName,  // From NameInputScene
-            dogType: dogData.name         // Selected dog (Alice, Remix, etc.)
-          });
-        }
-      });
+      this.selectDog(slot);
+    });
+
+    dogSprite.on('pointerdown', () => {
+      this.selectDog(slot);
     });
 
     return slot;
+  }
+
+  trySelectSlotAt(pointerX, pointerY) {
+    let bestSlot = null;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+
+    this.dogSlots.forEach((slot) => {
+      const dx = pointerX - slot.sprite.x;
+      const dy = pointerY - slot.sprite.y;
+      const distanceSq = (dx * dx) + (dy * dy);
+      const hitRadius = slot.hitRadius || 100;
+
+      if (distanceSq > (hitRadius * hitRadius)) {
+        return;
+      }
+
+      if (distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq;
+        bestSlot = slot;
+      }
+    });
+
+    if (bestSlot) {
+      this.selectDog(bestSlot);
+    }
+  }
+
+  selectDog(slot) {
+    if (!slot || this.selectionLocked) {
+      return;
+    }
+
+    this.selectionLocked = true;
+
+    // Visual feedback - quick scale down
+    this.tweens.add({
+      targets: slot.sprite,
+      scaleX: slot.scales.pressed,
+      scaleY: slot.scales.pressed,
+      duration: 50,
+      yoyo: true,
+      onComplete: () => {
+        // Start GameScene and pass BOTH player name AND selected dog
+        this.scene.start('GameScene', {
+          playerName: this.playerName,   // From NameInputScene
+          dogType: slot.dogData.name     // Selected dog (Alice, Remix, etc.)
+        });
+      }
+    });
   }
 
   getViewportFlags() {
@@ -218,6 +273,7 @@ class DogSelectScene extends Phaser.Scene {
 
       slot.clickZone.setPosition(x, y);
       slot.clickZone.setSize(clickZoneSize, clickZoneSize);
+      slot.hitRadius = clickZoneSize * 0.5;
     });
   }
 
@@ -225,6 +281,11 @@ class DogSelectScene extends Phaser.Scene {
     if (this.resizeHandler) {
       this.scale.off('resize', this.resizeHandler);
       this.resizeHandler = null;
+    }
+
+    if (this.scenePointerHandler) {
+      this.input.off('pointerdown', this.scenePointerHandler);
+      this.scenePointerHandler = null;
     }
   }
 }
