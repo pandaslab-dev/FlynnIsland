@@ -18,15 +18,19 @@ class TitleScene extends Phaser.Scene {
   create() {
     // Add sky blue background
     this.cameras.main.setBackgroundColor('#87CEEB');
+
+    const centerX = this.scale.width / 2;
+    const centerY = this.scale.height / 2;
+    const isPortraitViewport = this.scale.height > this.scale.width;
     
     // Add logo at top center
-    const logo = this.add.image(512, 250, 'logo');
+    const logo = this.add.image(centerX, centerY - (isPortraitViewport ? 200 : 130), 'logo');
     // Scale logo if needed (adjust to fit your logo size)
-    logo.setScale(0.5);
+    logo.setScale(isPortraitViewport ? 0.4 : 0.5);
     
     // Add "Play Now" button
-    const playButton = this.add.image(512, 500, 'playnow');
-    playButton.setScale(0.3);
+    const playButton = this.add.image(centerX, centerY + (isPortraitViewport ? 120 : 120), 'playnow');
+    playButton.setScale(isPortraitViewport ? 0.26 : 0.3);
     
     // Make button interactive
     playButton.setInteractive({ useHandCursor: true });
@@ -35,8 +39,8 @@ class TitleScene extends Phaser.Scene {
     playButton.on('pointerover', () => {
       this.tweens.add({
         targets: playButton,
-        scaleX: 0.35,
-        scaleY: 0.35,
+        scaleX: isPortraitViewport ? 0.3 : 0.35,
+        scaleY: isPortraitViewport ? 0.3 : 0.35,
         duration: 100,
         ease: 'Power2'
       });
@@ -46,8 +50,8 @@ class TitleScene extends Phaser.Scene {
     playButton.on('pointerout', () => {
       this.tweens.add({
         targets: playButton,
-        scaleX: 0.3,
-        scaleY: 0.3,
+        scaleX: isPortraitViewport ? 0.26 : 0.3,
+        scaleY: isPortraitViewport ? 0.26 : 0.3,
         duration: 100,
         ease: 'Power2'
       });
@@ -58,8 +62,8 @@ class TitleScene extends Phaser.Scene {
       // Visual feedback - quick scale down
       this.tweens.add({
         targets: playButton,
-        scaleX: 0.25,
-        scaleY: 0.25,
+        scaleX: isPortraitViewport ? 0.22 : 0.25,
+        scaleY: isPortraitViewport ? 0.22 : 0.25,
         duration: 50,
         yoyo: true,
         onComplete: () => {

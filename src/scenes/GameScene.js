@@ -87,7 +87,7 @@ class GameScene extends Phaser.Scene {
     );
 
     this.cameras.main.setBounds(0, 0, 2048, 2048);
-    this.cameras.main.setZoom(0.8);
+    this.cameras.main.setZoom(this.scale.height > this.scale.width ? 1.0 : 0.8);
 
     this.createDogAnimations();
     this.buildIslandCollisionMask();
@@ -537,15 +537,23 @@ class GameScene extends Phaser.Scene {
   createEmoteButtons() {
     const emojis = ['❤️', '😂', '😭', '😡', '🐾', '❗'];
 
-    const buttonSize = 60;
-    const buttonSpacing = 10;
+    const viewportWidth = this.scale.width;
+    const viewportHeight = this.scale.height;
+    const isTouchDevice = this.sys.game.device.input.touch;
+
+    const sidePadding = 16;
+    const buttonSpacing = Phaser.Math.Clamp(Math.floor(viewportWidth * 0.012), 6, 10);
+    const maxButtonSizeByWidth = Math.floor(
+      (viewportWidth - (sidePadding * 2) - (buttonSpacing * 5)) / 6
+    );
+    const buttonSize = Phaser.Math.Clamp(maxButtonSizeByWidth, 44, 60);
     const totalWidth = (buttonSize * 6) + (buttonSpacing * 5);
 
-    const startX = (1024 - totalWidth) / 2;
-    const yPosition = 700;
+    const firstCenterX = ((viewportWidth - totalWidth) / 2) + (buttonSize / 2);
+    const yPosition = isTouchDevice ? (viewportHeight - 220) : (viewportHeight - 68);
 
     emojis.forEach((emoji, index) => {
-      const xPosition = startX + (index * (buttonSize + buttonSpacing));
+      const xPosition = firstCenterX + (index * (buttonSize + buttonSpacing));
 
       const buttonBg = this.add.rectangle(
         xPosition,
@@ -620,26 +628,41 @@ class GameScene extends Phaser.Scene {
 
     this.input.addPointer(2);
 
-    const joystickX = 140;
-    const joystickY = 620;
+    const viewportWidth = this.scale.width;
+    const viewportHeight = this.scale.height;
+    const controlScale = Phaser.Math.Clamp(Math.min(viewportWidth, viewportHeight) / 768, 0.75, 1);
 
-    this.joystickBase = this.add.circle(joystickX, joystickY, 80, 0x222222, 0.35);
+    const baseRadius = Math.round(80 * controlScale);
+    const thumbRadius = Math.round(40 * controlScale);
+    const jumpRadius = Math.round(60 * controlScale);
+    const controlY = viewportHeight - (jumpRadius + 24);
+    const sideX = Math.max(baseRadius + 24, viewportWidth * 0.15);
+
+    const joystickX = sideX;
+    const joystickY = controlY;
+
+    this.joystickMaxDistance = Math.round(70 * controlScale);
+
+    this.joystickBase = this.add.circle(joystickX, joystickY, baseRadius, 0x222222, 0.35);
     this.joystickBase.setStrokeStyle(3, 0xffffff, 0.35);
     this.joystickBase.setScrollFactor(0);
     this.joystickBase.setDepth(1000);
 
-    this.joystickThumb = this.add.circle(joystickX, joystickY, 40, 0xffffff, 0.55);
+    this.joystickThumb = this.add.circle(joystickX, joystickY, thumbRadius, 0xffffff, 0.55);
     this.joystickThumb.setScrollFactor(0);
     this.joystickThumb.setDepth(1001);
 
-    this.jumpButton = this.add.circle(900, 620, 60, 0x4CAF50, 0.5);
+    const jumpX = viewportWidth - sideX;
+    const jumpY = controlY;
+
+    this.jumpButton = this.add.circle(jumpX, jumpY, jumpRadius, 0x4CAF50, 0.5);
     this.jumpButton.setStrokeStyle(3, 0xffffff, 0.6);
     this.jumpButton.setScrollFactor(0);
     this.jumpButton.setDepth(1000);
     this.jumpButton.setInteractive({ useHandCursor: false });
 
-    const jumpLabel = this.add.text(900, 620, 'JUMP', {
-      fontSize: '22px',
+    const jumpLabel = this.add.text(jumpX, jumpY, 'JUMP', {
+      fontSize: `${Math.round(22 * controlScale)}px`,
       fontFamily: 'Arial, sans-serif',
       color: '#ffffff',
       stroke: '#000000',
@@ -677,7 +700,7 @@ class GameScene extends Phaser.Scene {
         this.joystickBase.x,
         this.joystickBase.y
       );
-      if (distanceFromBase > 140) {
+      if (distanceFromBase > (baseRadius + (60 * controlScale))) {
         return;
       }
 

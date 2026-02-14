@@ -18,17 +18,24 @@ class NameInputScene extends Phaser.Scene {
   create() {
     // Set sky blue background
     this.cameras.main.setBackgroundColor('#87CEEB');
+
+    const centerX = this.scale.width / 2;
+    const centerY = this.scale.height / 2;
+    const isPortraitViewport = this.scale.height > this.scale.width;
     
     // Add dialog background at center of screen
-    const dialog = this.add.image(512, 384, 'enternamedialog');
-    dialog.setScale(0.6);
+    const dialog = this.add.image(centerX, centerY, 'enternamedialog');
+    dialog.setScale(isPortraitViewport ? 0.52 : 0.6);
+
+    this.inputWorldX = centerX;
+    this.inputWorldY = centerY - 14;
     
     // Create the HTML text input field
     this.createHTMLInput();
     
     // Create "Continue" button (starts disabled/gray)
     this.continueButton = this.add.text(
-      512, 500,              // Position
+      centerX, centerY + 116,  // Position
       'Continue',            // Text content
       {
         fontSize: '32px',
@@ -146,8 +153,8 @@ class NameInputScene extends Phaser.Scene {
     this.htmlInput.style.width = `${responsiveWidth}px`;
     this.htmlInput.style.fontSize = `${responsiveFont}px`;
     this.htmlInput.style.padding = `${responsivePadding}px`;
-    this.htmlInput.style.left = `${canvasRect.left + ((512 * scaleX) - (responsiveWidth / 2))}px`;
-    this.htmlInput.style.top = `${canvasRect.top + (370 * scaleY)}px`;
+    this.htmlInput.style.left = `${canvasRect.left + ((this.inputWorldX * scaleX) - (responsiveWidth / 2))}px`;
+    this.htmlInput.style.top = `${canvasRect.top + (this.inputWorldY * scaleY)}px`;
   }
   
   removeHTMLInput() {

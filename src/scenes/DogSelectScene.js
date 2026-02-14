@@ -33,37 +33,43 @@ class DogSelectScene extends Phaser.Scene {
   create() {
     // Set background
     this.cameras.main.setBackgroundColor('#87CEEB');
+
+    const centerX = this.scale.width / 2;
+    const centerY = this.scale.height / 2;
+    const isPortraitViewport = this.scale.height > this.scale.width;
     
     // Add dialog background
-    const dialog = this.add.image(512, 384, 'selectdogdialog');
-    dialog.setScale(0.8);
+    const dialog = this.add.image(centerX, centerY, 'selectdogdialog');
+    dialog.setScale(isPortraitViewport ? 0.65 : 0.8);
     
     // Define dog data and their positions in the grid
     // Positions match the 4 slots in selectdogdialog.png
+    const xOffset = isPortraitViewport ? 112 : 120;
+    const yOffset = isPortraitViewport ? 116 : 100;
     const dogs = [
       { 
         name: 'Alice',      // Display name (capitalized)
         key: 'alice',       // Asset key (lowercase)
-        x: 400,             // Top-left slot
-        y: 300 
+        x: centerX - xOffset,
+        y: centerY - yOffset
       },
       { 
         name: 'Remix', 
         key: 'remix',
-        x: 640,             // Top-right slot
-        y: 300 
+        x: centerX + xOffset,
+        y: centerY - yOffset
       },
       { 
         name: 'Sapphire', 
         key: 'sapphire',
-        x: 400,             // Bottom-left slot
-        y: 500 
+        x: centerX - xOffset,
+        y: centerY + yOffset
       },
       { 
         name: 'Wendy', 
         key: 'wendy',
-        x: 640,             // Bottom-right slot
-        y: 500 
+        x: centerX + xOffset,
+        y: centerY + yOffset
       }
     ];
     

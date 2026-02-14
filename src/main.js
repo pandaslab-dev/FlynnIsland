@@ -2,10 +2,14 @@
 // FLYNN ISLAND - Main Configuration
 // ============================================
 
+const isPortraitViewport = window.innerHeight > window.innerWidth;
+const baseWidth = isPortraitViewport ? 576 : 1024;
+const baseHeight = isPortraitViewport ? 1024 : 768;
+
 const config = {
   type: Phaser.AUTO,
-  width: 1024,
-  height: 768,
+  width: baseWidth,
+  height: baseHeight,
   backgroundColor: '#1a1a1a',
   pixelArt: true,
   
