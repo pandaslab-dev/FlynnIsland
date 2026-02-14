@@ -22,11 +22,22 @@ class GameScene extends Phaser.Scene {
     this.joystickBase = null;
     this.joystickThumb = null;
     this.joystickPointerId = null;
+    this.joystickPointer = null;
     this.joystickMaxDistance = 70;
     this.joystickVector = new Phaser.Math.Vector2(0, 0);
 
     this.jumpButton = null;
     this.mobileJumpRequested = false;
+    this.mobileControlHandlers = null;
+    this.mobileControlElements = [];
+    this.emoteButtonElements = [];
+    this.resizeHandler = null;
+    this.extraPointersAdded = false;
+    this.lastMobileControlLayout = {
+      width: 0,
+      height: 0,
+      isPortrait: null
+    };
 
     this.network = null;
     this.lastInputSentAt = 0;
@@ -100,7 +111,7 @@ class GameScene extends Phaser.Scene {
     );
 
     this.cameras.main.setBounds(0, 0, 2048, 2048);
-    this.cameras.main.setZoom(this.scale.height > this.scale.width ? 1.0 : 0.8);
+    this.updateCameraZoom();
 
     this.createDogAnimations();
     this.buildIslandCollisionMask();
@@ -143,6 +154,9 @@ class GameScene extends Phaser.Scene {
 
     this.createEmoteButtons();
     this.createMobileControls();
+
+    this.resizeHandler = () => this.handleViewportResize();
+    this.scale.on('resize', this.resizeHandler);
 
     this.events.once('shutdown', this.handleSceneShutdown, this);
     this.events.once('destroy', this.handleSceneShutdown, this);
@@ -579,7 +593,80 @@ class GameScene extends Phaser.Scene {
     playerEntity.sprite.setTexture(`${playerEntity.dogKey}_stand`);
   }
 
+  getViewportFlags() {
+    if (window.FlynnViewportScaler && typeof window.FlynnViewportScaler.resolveViewportFlags === 'function') {
+      return window.FlynnViewportScaler.resolveViewportFlags(this.scale.width, this.scale.height);
+    }
+
+    return {
+      isPortrait: this.scale.height > this.scale.width,
+      isTablet: false,
+      hasTouch: this.sys.game.device.input.touch
+    };
+  }
+
+  calculateCameraZoom() {
+    const flags = this.getViewportFlags();
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const minSide = Math.min(width, height);
+    const aspect = width / Math.max(height, 1);
+
+    let zoom = Phaser.Math.Clamp(0.76 + ((minSide - 700) / 500) * 0.2, 0.72, 0.98);
+
+    if (flags.isPortrait) {
+      zoom += flags.isTablet ? 0.08 : 0.12;
+    }
+
+    if (aspect > 1.8) {
+      zoom -= 0.06;
+    }
+
+    return Phaser.Math.Clamp(zoom, 0.72, 1.05);
+  }
+
+  updateCameraZoom() {
+    this.cameras.main.setZoom(this.calculateCameraZoom());
+  }
+
+  handleViewportResize() {
+    this.updateCameraZoom();
+    this.createEmoteButtons();
+
+    if (this.shouldRebuildMobileControls()) {
+      this.createMobileControls();
+    }
+  }
+
+  shouldRebuildMobileControls() {
+    if (!this.sys.game.device.input.touch) {
+      return false;
+    }
+
+    if (!this.joystickBase || !this.jumpButton) {
+      return true;
+    }
+
+    if (this.joystickPointer && this.joystickPointer.isDown) {
+      return false;
+    }
+
+    const currentWidth = this.scale.width;
+    const currentHeight = this.scale.height;
+    const currentIsPortrait = currentHeight >= currentWidth;
+    const widthDelta = Math.abs(currentWidth - this.lastMobileControlLayout.width);
+    const heightDelta = Math.abs(currentHeight - this.lastMobileControlLayout.height);
+
+    if (this.lastMobileControlLayout.isPortrait !== currentIsPortrait) {
+      return true;
+    }
+
+    return widthDelta > 120 || heightDelta > 120;
+  }
+
   createEmoteButtons() {
+    this.clearEmoteButtons();
+
     const emojis = ['❤️', '😂', '😭', '😡', '🐾', '❗'];
 
     const viewportWidth = this.scale.width;
@@ -664,16 +751,33 @@ class GameScene extends Phaser.Scene {
 
       buttonBg.setScrollFactor(0);
       emojiText.setScrollFactor(0);
+
+      this.emoteButtonElements.push(buttonBg, emojiText);
     });
   }
 
+  clearEmoteButtons() {
+    this.emoteButtonElements.forEach((element) => {
+      if (element && element.active) {
+        element.destroy();
+      }
+    });
+
+    this.emoteButtonElements = [];
+  }
+
   createMobileControls() {
+    this.clearMobileControls();
+
     const isTouchDevice = this.sys.game.device.input.touch;
     if (!isTouchDevice) {
       return;
     }
 
-    this.input.addPointer(2);
+    if (!this.extraPointersAdded) {
+      this.input.addPointer(2);
+      this.extraPointersAdded = true;
+    }
 
     const viewportWidth = this.scale.width;
     const viewportHeight = this.scale.height;
@@ -718,6 +822,7 @@ class GameScene extends Phaser.Scene {
     jumpLabel.setOrigin(0.5, 0.5);
     jumpLabel.setScrollFactor(0);
     jumpLabel.setDepth(1001);
+    this.mobileControlElements.push(this.joystickBase, this.joystickThumb, this.jumpButton, jumpLabel);
 
     this.jumpButton.on('pointerdown', () => {
       this.mobileJumpRequested = true;
@@ -732,44 +837,87 @@ class GameScene extends Phaser.Scene {
       this.jumpButton.setFillStyle(0x4CAF50, 0.5);
     });
 
-    this.input.on('pointerdown', (pointer) => {
-      if (this.joystickPointerId !== null) {
-        return;
-      }
+    this.mobileControlHandlers = {
+      pointerdown: (pointer) => {
+        if (this.joystickPointer) {
+          return;
+        }
 
-      if (pointer.x > this.scale.width / 2) {
-        return;
-      }
+        if (pointer.x > this.scale.width / 2) {
+          return;
+        }
 
-      const distanceFromBase = Phaser.Math.Distance.Between(
-        pointer.x,
-        pointer.y,
-        this.joystickBase.x,
-        this.joystickBase.y
-      );
-      if (distanceFromBase > (baseRadius + (60 * controlScale))) {
-        return;
-      }
+        const distanceFromBase = Phaser.Math.Distance.Between(
+          pointer.x,
+          pointer.y,
+          this.joystickBase.x,
+          this.joystickBase.y
+        );
+        if (distanceFromBase > (baseRadius + (60 * controlScale))) {
+          return;
+        }
 
-      this.joystickPointerId = pointer.id;
-      this.updateJoystick(pointer);
+        this.joystickPointer = pointer;
+        this.joystickPointerId = pointer.id;
+        this.updateJoystick(pointer);
+      },
+      pointermove: (pointer) => {
+        if (pointer !== this.joystickPointer) {
+          return;
+        }
+
+        this.updateJoystick(pointer);
+      },
+      pointerup: (pointer) => {
+        if (pointer !== this.joystickPointer) {
+          return;
+        }
+
+        this.resetJoystick();
+      },
+      pointerupoutside: (pointer) => {
+        if (pointer !== this.joystickPointer) {
+          return;
+        }
+
+        this.resetJoystick();
+      }
+    };
+
+    this.input.on('pointerdown', this.mobileControlHandlers.pointerdown);
+    this.input.on('pointermove', this.mobileControlHandlers.pointermove);
+    this.input.on('pointerup', this.mobileControlHandlers.pointerup);
+    this.input.on('pointerupoutside', this.mobileControlHandlers.pointerupoutside);
+
+    this.lastMobileControlLayout.width = this.scale.width;
+    this.lastMobileControlLayout.height = this.scale.height;
+    this.lastMobileControlLayout.isPortrait = this.scale.height >= this.scale.width;
+  }
+
+  clearMobileControls() {
+    if (this.mobileControlHandlers) {
+      this.input.off('pointerdown', this.mobileControlHandlers.pointerdown);
+      this.input.off('pointermove', this.mobileControlHandlers.pointermove);
+      this.input.off('pointerup', this.mobileControlHandlers.pointerup);
+      this.input.off('pointerupoutside', this.mobileControlHandlers.pointerupoutside);
+      this.mobileControlHandlers = null;
+    }
+
+    this.mobileControlElements.forEach((element) => {
+      if (element && element.active) {
+        element.destroy();
+      }
     });
 
-    this.input.on('pointermove', (pointer) => {
-      if (pointer.id !== this.joystickPointerId) {
-        return;
-      }
-
-      this.updateJoystick(pointer);
-    });
-
-    this.input.on('pointerup', (pointer) => {
-      if (pointer.id !== this.joystickPointerId) {
-        return;
-      }
-
-      this.resetJoystick();
-    });
+    this.mobileControlElements = [];
+    this.joystickBase = null;
+    this.joystickThumb = null;
+    this.jumpButton = null;
+    this.mobileJumpRequested = false;
+    this.lastMobileControlLayout.width = 0;
+    this.lastMobileControlLayout.height = 0;
+    this.lastMobileControlLayout.isPortrait = null;
+    this.resetJoystick();
   }
 
   updateJoystick(pointer) {
@@ -800,6 +948,7 @@ class GameScene extends Phaser.Scene {
   }
 
   resetJoystick() {
+    this.joystickPointer = null;
     this.joystickPointerId = null;
     this.joystickVector.set(0, 0);
 
@@ -858,6 +1007,12 @@ class GameScene extends Phaser.Scene {
     }
 
     this.moveVector.set(0, 0);
+
+    if (this.joystickPointer && this.joystickPointer.isDown) {
+      this.updateJoystick(this.joystickPointer);
+    } else if (this.joystickPointer && !this.joystickPointer.isDown) {
+      this.resetJoystick();
+    }
 
     if (this.keys.A.isDown || this.cursors.left.isDown) {
       this.moveVector.x = -1;
@@ -1049,6 +1204,11 @@ class GameScene extends Phaser.Scene {
   }
 
   handleSceneShutdown() {
+    if (this.resizeHandler) {
+      this.scale.off('resize', this.resizeHandler);
+      this.resizeHandler = null;
+    }
+
     if (this.network && typeof this.network.disconnect === 'function') {
       this.network.disconnect();
     }
@@ -1058,7 +1218,9 @@ class GameScene extends Phaser.Scene {
     });
 
     this.players = {};
-    this.resetJoystick();
+    this.clearEmoteButtons();
+    this.clearMobileControls();
+    this.extraPointersAdded = false;
 
     if (this.ballSprite) {
       this.ballSprite.destroy();

@@ -9,6 +9,8 @@ class NameInputScene extends Phaser.Scene {
     super({ key: 'NameInputScene' });
     this.playerName = '';  // Stores the entered name
     this.isMobileInputFocused = false;
+    this.dialog = null;
+    this.continueButton = null;
   }
   
   preload() {
@@ -19,24 +21,15 @@ class NameInputScene extends Phaser.Scene {
   create() {
     // Set sky blue background
     this.cameras.main.setBackgroundColor('#87CEEB');
-
-    const centerX = this.scale.width / 2;
-    const centerY = this.scale.height / 2;
-    const isPortraitViewport = this.scale.height > this.scale.width;
     
     // Add dialog background at center of screen
-    const dialog = this.add.image(centerX, centerY, 'enternamedialog');
-    dialog.setScale(isPortraitViewport ? 0.52 : 0.6);
-
-    this.inputWorldX = centerX;
-    this.inputWorldY = centerY - 14;
-    
-    // Create the HTML text input field
-    this.createHTMLInput();
+    this.dialog = this.add.image(0, 0, 'enternamedialog');
+    this.inputWorldX = 0;
+    this.inputWorldY = 0;
     
     // Create "Continue" button (starts disabled/gray)
     this.continueButton = this.add.text(
-      centerX, centerY + 116,  // Position
+      0, 0,                  // Position (updated in layoutScene)
       'Continue',            // Text content
       {
         fontSize: '32px',
@@ -74,6 +67,10 @@ class NameInputScene extends Phaser.Scene {
         });
       }
     });
+
+    this.layoutScene();
+    this.createHTMLInput();
+    this.positionHTMLInput();
     
     this.events.once('shutdown', this.handleSceneShutdown, this);
     this.events.once('destroy', this.handleSceneShutdown, this);
@@ -132,6 +129,7 @@ class NameInputScene extends Phaser.Scene {
     this.htmlInput = inputElement;
     
     this.repositionInputHandler = () => {
+      this.layoutScene();
       this.positionHTMLInput();
     };
     
@@ -159,6 +157,8 @@ class NameInputScene extends Phaser.Scene {
     const gameHeight = this.scale.gameSize.height;
     const scaleX = canvasRect.width / gameWidth;
     const scaleY = canvasRect.height / gameHeight;
+    const flags = this.getViewportFlags();
+    const isPhone = flags.hasTouch && !flags.isTablet;
     
     const responsiveWidth = Phaser.Math.Clamp(300 * scaleX, 180, 320);
     const responsiveFont = Phaser.Math.Clamp(28 * scaleY, 16, 28);
@@ -168,11 +168,67 @@ class NameInputScene extends Phaser.Scene {
     this.htmlInput.style.fontSize = `${responsiveFont}px`;
     this.htmlInput.style.padding = `${responsivePadding}px`;
     this.htmlInput.style.left = `${canvasRect.left + ((this.inputWorldX * scaleX) - (responsiveWidth / 2))}px`;
-    this.htmlInput.style.top = `${canvasRect.top + (this.inputWorldY * scaleY)}px`;
+    this.htmlInput.style.top = `${canvasRect.top + (this.inputWorldY * scaleY) - (isPhone ? 25 : 0)}px`;
   }
 
   isMobileViewport() {
-    return this.scale.height > this.scale.width || window.matchMedia('(pointer: coarse)').matches;
+    const flags = this.getViewportFlags();
+    return flags.hasTouch && (flags.isPortrait || flags.isTablet);
+  }
+
+  getViewportFlags() {
+    if (window.FlynnViewportScaler && typeof window.FlynnViewportScaler.resolveViewportFlags === 'function') {
+      return window.FlynnViewportScaler.resolveViewportFlags(this.scale.width, this.scale.height);
+    }
+
+    return {
+      hasTouch: window.matchMedia('(pointer: coarse)').matches,
+      isPortrait: this.scale.height > this.scale.width,
+      isTablet: false
+    };
+  }
+
+  layoutScene() {
+    if (!this.dialog || !this.continueButton) {
+      return;
+    }
+
+    const centerX = this.scale.width / 2;
+    const centerY = this.scale.height / 2;
+    const flags = this.getViewportFlags();
+    const isPhone = flags.hasTouch && !flags.isTablet;
+    const uiScale = window.FlynnViewportScaler
+      ? window.FlynnViewportScaler.getUiScale(this.scale.width, this.scale.height)
+      : 1;
+
+    const margin = isPhone ? 34 : 26;
+
+    let dialogScale = flags.isPortrait
+      ? (flags.isTablet ? 0.56 : isPhone ? 0.47 : 0.52)
+      : isPhone
+        ? 0.5
+        : Phaser.Math.Clamp(0.6 + ((uiScale - 1) * 0.1), 0.56, 0.68);
+    const maxDialogScaleByWidth = (this.scale.width - (margin * 2)) / this.dialog.width;
+    const maxDialogScaleByHeight = (this.scale.height - (margin * 2)) / this.dialog.height;
+    dialogScale = Math.min(dialogScale, maxDialogScaleByWidth, maxDialogScaleByHeight);
+
+    const buttonYOffset = flags.isPortrait
+      ? (dialogScale * (isPhone ? 208 : 223))
+      : (dialogScale * (isPhone ? 195 : 206));
+    const buttonY = centerY + buttonYOffset;
+    const fontSize = Math.round(Phaser.Math.Clamp(32 * uiScale, 24, 36));
+    const paddingX = Math.round(Phaser.Math.Clamp(20 * uiScale, 14, 26));
+    const paddingY = Math.round(Phaser.Math.Clamp(10 * uiScale, 8, 14));
+
+    this.dialog.setPosition(centerX, centerY);
+    this.dialog.setScale(dialogScale);
+
+    this.continueButton.setPosition(centerX, buttonY);
+    this.continueButton.setFontSize(fontSize);
+    this.continueButton.setPadding(paddingX, paddingY, paddingX, paddingY);
+
+    this.inputWorldX = centerX;
+    this.inputWorldY = centerY - (dialogScale * (flags.isTablet ? 14 : (isPhone ? 22 : 27)));
   }
   
   removeHTMLInput() {

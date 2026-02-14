@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Flynn Island</title>
   <style>
     body {
@@ -12,9 +12,15 @@
       justify-content: center;
       align-items: center;
       width: 100vw;
+      min-height: 100svh;
       height: 100dvh;
       overflow: hidden;
+      overscroll-behavior: none;
       background-color: #1a1a1a;  /* Dark background around canvas */
+    }
+
+    canvas {
+      touch-action: none;
     }
     
     /* Style the name input placeholder text */
@@ -33,6 +39,7 @@
     Load all scene files BEFORE main.js
     Order matters! Each scene class must exist before main.js tries to use it
   -->
+  <script src="src/utils/ViewportScaler.js"></script>
   <script src="src/scenes/TitleScene.js"></script>
   <script src="src/scenes/NameInputScene.js"></script>
   <script src="src/scenes/DogSelectScene.js"></script>

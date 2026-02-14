@@ -7,6 +7,14 @@
 class TitleScene extends Phaser.Scene {
   constructor() {
     super({ key: 'TitleScene' });  // Scene identifier
+    this.logo = null;
+    this.playButton = null;
+    this.playButtonScales = {
+      base: 0.3,
+      hover: 0.35,
+      pressed: 0.25
+    };
+    this.resizeHandler = null;
   }
   
   preload() {
@@ -20,55 +28,48 @@ class TitleScene extends Phaser.Scene {
     // Add sky blue background
     this.cameras.main.setBackgroundColor('#87CEEB');
 
-    const centerX = this.scale.width / 2;
-    const centerY = this.scale.height / 2;
-    const isPortraitViewport = this.scale.height > this.scale.width;
-
     this.ensureBackgroundMusic();
     
     // Add logo at top center
-    const logo = this.add.image(centerX, centerY - (isPortraitViewport ? 200 : 130), 'logo');
-    // Scale logo if needed (adjust to fit your logo size)
-    logo.setScale(isPortraitViewport ? 0.4 : 0.5);
+    this.logo = this.add.image(0, 0, 'logo');
     
     // Add "Play Now" button
-    const playButton = this.add.image(centerX, centerY + (isPortraitViewport ? 120 : 120), 'playnow');
-    playButton.setScale(isPortraitViewport ? 0.26 : 0.3);
+    this.playButton = this.add.image(0, 0, 'playnow');
     
     // Make button interactive
-    playButton.setInteractive({ useHandCursor: true });
+    this.playButton.setInteractive({ useHandCursor: true });
     
     // Hover effect - scale up slightly
-    playButton.on('pointerover', () => {
+    this.playButton.on('pointerover', () => {
       this.tweens.add({
-        targets: playButton,
-        scaleX: isPortraitViewport ? 0.3 : 0.35,
-        scaleY: isPortraitViewport ? 0.3 : 0.35,
+        targets: this.playButton,
+        scaleX: this.playButtonScales.hover,
+        scaleY: this.playButtonScales.hover,
         duration: 100,
         ease: 'Power2'
       });
     });
     
     // Hover out - scale back to normal
-    playButton.on('pointerout', () => {
+    this.playButton.on('pointerout', () => {
       this.tweens.add({
-        targets: playButton,
-        scaleX: isPortraitViewport ? 0.26 : 0.3,
-        scaleY: isPortraitViewport ? 0.26 : 0.3,
+        targets: this.playButton,
+        scaleX: this.playButtonScales.base,
+        scaleY: this.playButtonScales.base,
         duration: 100,
         ease: 'Power2'
       });
     });
     
     // Click handler - transition to game
-    playButton.on('pointerdown', () => {
+    this.playButton.on('pointerdown', () => {
       this.ensureBackgroundMusic();
 
       // Visual feedback - quick scale down
       this.tweens.add({
-        targets: playButton,
-        scaleX: isPortraitViewport ? 0.22 : 0.25,
-        scaleY: isPortraitViewport ? 0.22 : 0.25,
+        targets: this.playButton,
+        scaleX: this.playButtonScales.pressed,
+        scaleY: this.playButtonScales.pressed,
         duration: 50,
         yoyo: true,
         onComplete: () => {
@@ -76,7 +77,104 @@ class TitleScene extends Phaser.Scene {
         }
       });
     });
-    
+
+    this.layoutScene();
+    this.resizeHandler = () => this.layoutScene();
+    this.scale.on('resize', this.resizeHandler);
+
+    this.events.once('shutdown', this.handleSceneShutdown, this);
+    this.events.once('destroy', this.handleSceneShutdown, this);
+  }
+
+  getViewportFlags() {
+    if (window.FlynnViewportScaler && typeof window.FlynnViewportScaler.resolveViewportFlags === 'function') {
+      return window.FlynnViewportScaler.resolveViewportFlags(this.scale.width, this.scale.height);
+    }
+
+    return {
+      hasTouch: window.matchMedia('(pointer: coarse)').matches,
+      isPortrait: this.scale.height > this.scale.width,
+      isTablet: false
+    };
+  }
+
+  layoutScene() {
+    if (!this.logo || !this.playButton) {
+      return;
+    }
+
+    const centerX = this.scale.width / 2;
+    const centerY = this.scale.height / 2;
+    const flags = this.getViewportFlags();
+    const isPhone = flags.hasTouch && !flags.isTablet;
+    const uiScale = window.FlynnViewportScaler
+      ? window.FlynnViewportScaler.getUiScale(this.scale.width, this.scale.height)
+      : 1;
+
+    const margin = isPhone ? 36 : 26;
+
+    let logoScale = flags.isPortrait
+      ? (flags.isTablet ? 0.45 : isPhone ? 0.34 : 0.4)
+      : isPhone
+        ? 0.3
+        : Phaser.Math.Clamp(0.45 + ((uiScale - 1) * 0.2), 0.42, 0.55);
+    let buttonBaseScale = flags.isPortrait
+      ? (flags.isTablet ? 0.29 : isPhone ? 0.22 : 0.26)
+      : isPhone
+        ? 0.2
+        : Phaser.Math.Clamp(0.29 + ((uiScale - 1) * 0.12), 0.27, 0.34);
+
+    const maxWidth = this.scale.width - (margin * 2);
+    logoScale = Math.min(logoScale, maxWidth / this.logo.width);
+    buttonBaseScale = Math.min(buttonBaseScale, maxWidth / this.playButton.width);
+
+    this.playButtonScales.base = buttonBaseScale;
+    this.playButtonScales.hover = buttonBaseScale + 0.04;
+    this.playButtonScales.pressed = Math.max(buttonBaseScale - 0.04, 0.2);
+
+    let logoY = centerY - (
+      flags.isPortrait
+        ? (flags.isTablet ? 220 : isPhone ? 170 : 200)
+        : (isPhone ? 86 : 130)
+    );
+    let buttonY = centerY + (
+      flags.isPortrait
+        ? (flags.isTablet ? 132 : isPhone ? 126 : 120)
+        : (isPhone ? 88 : 120)
+    );
+
+    this.logo.setScale(logoScale);
+    this.logo.setPosition(centerX, logoY);
+
+    this.playButton.setScale(this.playButtonScales.base);
+    this.playButton.setPosition(centerX, buttonY);
+
+    const topEdge = this.logo.y - (this.logo.displayHeight / 2);
+    const bottomEdge = this.playButton.y + (this.playButton.displayHeight / 2);
+    const usableTop = margin;
+    const usableBottom = this.scale.height - margin;
+    let shiftY = 0;
+
+    if (topEdge < usableTop) {
+      shiftY += usableTop - topEdge;
+    }
+    if ((bottomEdge + shiftY) > usableBottom) {
+      shiftY -= (bottomEdge + shiftY) - usableBottom;
+    }
+
+    if (shiftY !== 0) {
+      logoY += shiftY;
+      buttonY += shiftY;
+      this.logo.setPosition(centerX, logoY);
+      this.playButton.setPosition(centerX, buttonY);
+    }
+  }
+
+  handleSceneShutdown() {
+    if (this.resizeHandler) {
+      this.scale.off('resize', this.resizeHandler);
+      this.resizeHandler = null;
+    }
   }
 
   ensureBackgroundMusic() {
