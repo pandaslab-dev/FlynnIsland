@@ -378,6 +378,12 @@ class GameScene extends Phaser.Scene {
       activeIds.add(snapshot.id);
 
       const isLocalPlayer = snapshot.id === this.localPlayerId;
+      if (isLocalPlayer) {
+        // Local player is currently client-driven; skip snapshot correction
+        // to avoid jitter/rubber-banding until reconciliation is implemented.
+        return;
+      }
+
       const playerEntity = this.addOrUpdatePlayer({
         id: snapshot.id,
         name: snapshot.name,
@@ -385,7 +391,7 @@ class GameScene extends Phaser.Scene {
         x: snapshot.x,
         y: snapshot.y,
         flipX: snapshot.flipX,
-        isLocal: isLocalPlayer
+        isLocal: false
       });
 
       if (!playerEntity) {
