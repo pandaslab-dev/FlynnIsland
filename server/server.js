@@ -41,7 +41,10 @@ const ball = {
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
-app.use(express.static(path.resolve(__dirname, '..')));
+
+const path = require('path');
+
+app.use(express.static(path.join(__dirname, '..')));
 
 app.get('/health', (req, res) => {
   res.json({

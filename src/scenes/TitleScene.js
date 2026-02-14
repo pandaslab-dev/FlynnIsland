@@ -13,6 +13,7 @@ class TitleScene extends Phaser.Scene {
     // Load title screen assets
     this.load.image('logo', 'misc_assets/logo.png');
     this.load.image('playnow', 'misc_assets/playnow.png');
+    this.load.audio('background_music', 'misc_assets/music.mp3');
   }
   
   create() {
@@ -22,6 +23,8 @@ class TitleScene extends Phaser.Scene {
     const centerX = this.scale.width / 2;
     const centerY = this.scale.height / 2;
     const isPortraitViewport = this.scale.height > this.scale.width;
+
+    this.ensureBackgroundMusic();
     
     // Add logo at top center
     const logo = this.add.image(centerX, centerY - (isPortraitViewport ? 200 : 130), 'logo');
@@ -59,6 +62,8 @@ class TitleScene extends Phaser.Scene {
     
     // Click handler - transition to game
     playButton.on('pointerdown', () => {
+      this.ensureBackgroundMusic();
+
       // Visual feedback - quick scale down
       this.tweens.add({
         targets: playButton,
@@ -72,5 +77,41 @@ class TitleScene extends Phaser.Scene {
       });
     });
     
+  }
+
+  ensureBackgroundMusic() {
+    const existingMusic = this.sound.get('background_music');
+
+    if (existingMusic && existingMusic.isPlaying) {
+      return;
+    }
+
+    const playMusic = () => {
+      const currentMusic = this.sound.get('background_music');
+      if (currentMusic && currentMusic.isPlaying) {
+        return;
+      }
+
+      if (currentMusic) {
+        currentMusic.play({ loop: true, volume: 0.5 });
+        return;
+      }
+
+      const music = this.sound.add('background_music', {
+        loop: true,
+        volume: 0.5
+      });
+      music.play();
+    };
+
+    if (this.sound.locked) {
+      this.sound.once(Phaser.Sound.Events.UNLOCKED, playMusic);
+      this.input.once('pointerdown', () => {
+        this.sound.unlock();
+      });
+      return;
+    }
+
+    playMusic();
   }
 }
