@@ -20,7 +20,15 @@ class FlynnNetworkBridge {
       return this.localPlayerId;
     }
 
-    this.socket = window.io();
+    const isLocalHost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
+
+    const socketServerUrl = isLocalHost
+      ? 'http://localhost:3000'
+      : 'https://flynnisland.pandaslab.dev';
+
+    this.socket = window.io(socketServerUrl);
 
     this.socket.on('connect', () => {
       this.localPlayerId = this.socket.id;
