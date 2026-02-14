@@ -7,6 +7,7 @@
 
 # Future node_modules (when we add npm later)
 node_modules/
+.env
 
 # Future server files (when we add Colyseus)
 server/node_modules/
