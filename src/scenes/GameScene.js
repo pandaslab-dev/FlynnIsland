@@ -14,6 +14,7 @@ class GameScene extends Phaser.Scene {
     this.spaceKey = null;
 
     this.isJumping = false;
+    this.jumpTween = null;
     this.SPEED = 200;
 
     this.emoteKeys = null;
@@ -78,6 +79,11 @@ class GameScene extends Phaser.Scene {
       name: 'Player',
       dogType: 'Remix'
     };
+
+    this.localLastSafePosition = {
+      x: 1024,
+      y: 1024
+    };
   }
 
   init(data) {
@@ -131,12 +137,6 @@ class GameScene extends Phaser.Scene {
     const localPlayer = this.getLocalPlayer();
     if (localPlayer) {
       this.cameras.main.startFollow(localPlayer.sprite, true, 0.1, 0.1);
-
-      localPlayer.sprite.on('animationcomplete', (animation) => {
-        if (animation.key === this.getAnimationKey(localPlayer, 'jump')) {
-          this.isJumping = false;
-        }
-      });
     }
 
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -476,6 +476,8 @@ class GameScene extends Phaser.Scene {
       playerEntity.sprite.setPosition(playerData.x, playerData.y);
       playerEntity.targetX = playerData.x;
       playerEntity.targetY = playerData.y;
+      this.localLastSafePosition.x = playerData.x;
+      this.localLastSafePosition.y = playerData.y;
     }
 
     this.updatePlayerDecorations(playerEntity);
@@ -591,6 +593,109 @@ class GameScene extends Phaser.Scene {
 
     playerEntity.sprite.anims.stop();
     playerEntity.sprite.setTexture(`${playerEntity.dogKey}_stand`);
+  }
+
+  findNearestWalkablePosition(startX, startY, maxRadius = 140, radiusStep = 6) {
+    if (this.canPlayerOccupy(startX, startY)) {
+      return { x: startX, y: startY };
+    }
+
+    const angleStep = Math.PI / 8;
+    for (let radius = radiusStep; radius <= maxRadius; radius += radiusStep) {
+      for (let angle = 0; angle < (Math.PI * 2); angle += angleStep) {
+        const candidateX = startX + (Math.cos(angle) * radius);
+        const candidateY = startY + (Math.sin(angle) * radius);
+
+        if (this.canPlayerOccupy(candidateX, candidateY)) {
+          return { x: candidateX, y: candidateY };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  ensureLocalPlayerOnWalkableGround(localPlayer) {
+    if (!localPlayer || !localPlayer.sprite) {
+      return;
+    }
+
+    const currentX = localPlayer.sprite.x;
+    const currentY = localPlayer.sprite.y;
+
+    if (this.canPlayerOccupy(currentX, currentY)) {
+      this.localLastSafePosition.x = currentX;
+      this.localLastSafePosition.y = currentY;
+      return;
+    }
+
+    const nearest = this.findNearestWalkablePosition(currentX, currentY);
+    if (nearest) {
+      localPlayer.sprite.setPosition(nearest.x, nearest.y);
+      this.localLastSafePosition.x = nearest.x;
+      this.localLastSafePosition.y = nearest.y;
+      return;
+    }
+
+    localPlayer.sprite.setPosition(this.localLastSafePosition.x, this.localLastSafePosition.y);
+  }
+
+  applyJumpEdgePushback(localPlayer) {
+    if (!localPlayer || !localPlayer.sprite) {
+      return false;
+    }
+
+    const playerX = localPlayer.sprite.x;
+    const playerY = localPlayer.sprite.y;
+    const probeRadius = 44;
+    const directions = [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+      { x: 0.7071, y: 0.7071 },
+      { x: -0.7071, y: 0.7071 },
+      { x: 0.7071, y: -0.7071 },
+      { x: -0.7071, y: -0.7071 }
+    ];
+
+    const pushVector = new Phaser.Math.Vector2(0, 0);
+    directions.forEach((direction) => {
+      const sampleX = playerX + (direction.x * probeRadius);
+      const sampleY = playerY + (direction.y * probeRadius);
+
+      if (this.isBlockedAtWorldPoint(sampleX, sampleY)) {
+        // Repel away from blocked edge samples.
+        pushVector.x -= direction.x;
+        pushVector.y -= direction.y;
+      }
+    });
+
+    if (pushVector.lengthSq() < 0.01) {
+      return false;
+    }
+
+    pushVector.normalize();
+    const pushDistance = 18;
+    const targetX = playerX + (pushVector.x * pushDistance);
+    const targetY = playerY + (pushVector.y * pushDistance);
+
+    if (this.canPlayerOccupy(targetX, targetY)) {
+      localPlayer.sprite.setPosition(targetX, targetY);
+      this.localLastSafePosition.x = targetX;
+      this.localLastSafePosition.y = targetY;
+      return true;
+    }
+
+    const nearest = this.findNearestWalkablePosition(targetX, targetY, 80, 4);
+    if (nearest) {
+      localPlayer.sprite.setPosition(nearest.x, nearest.y);
+      this.localLastSafePosition.x = nearest.x;
+      this.localLastSafePosition.y = nearest.y;
+      return true;
+    }
+
+    return false;
   }
 
   getViewportFlags() {
@@ -966,15 +1071,36 @@ class GameScene extends Phaser.Scene {
     }
 
     if ((Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.mobileJumpRequested) && !this.isJumping) {
+      const didPushFromEdge = this.applyJumpEdgePushback(localPlayer);
+      if (didPushFromEdge) {
+        this.updateAllPlayerDecorations();
+      }
+
       this.isJumping = true;
       this.playEntityAnimation(localPlayer, 'jump');
 
-      this.tweens.add({
+      if (this.jumpTween) {
+        this.jumpTween.stop();
+        this.jumpTween = null;
+      }
+
+      const jumpStartY = localPlayer.sprite.y;
+      const jumpStartX = localPlayer.sprite.x;
+
+      this.jumpTween = this.tweens.add({
         targets: localPlayer.sprite,
-        y: localPlayer.sprite.y - 50,
+        y: jumpStartY - 50,
         duration: 250,
         yoyo: true,
-        ease: 'Quad.easeOut'
+        ease: 'Quad.easeOut',
+        onComplete: () => {
+          this.jumpTween = null;
+          localPlayer.sprite.x = jumpStartX;
+          localPlayer.sprite.y = jumpStartY;
+          this.isJumping = false;
+          this.ensureLocalPlayerOnWalkableGround(localPlayer);
+          this.updateAllPlayerDecorations();
+        }
       });
 
       this.mobileJumpRequested = false;
@@ -1063,6 +1189,7 @@ class GameScene extends Phaser.Scene {
       this.playEntityAnimation(localPlayer, 'stand');
     }
 
+    this.ensureLocalPlayerOnWalkableGround(localPlayer);
     this.interpolateRemotePlayers(delta);
     this.interpolateBall(delta);
     this.updateAllPlayerDecorations();
@@ -1221,6 +1348,12 @@ class GameScene extends Phaser.Scene {
     this.clearEmoteButtons();
     this.clearMobileControls();
     this.extraPointersAdded = false;
+
+    if (this.jumpTween) {
+      this.jumpTween.stop();
+      this.jumpTween = null;
+    }
+    this.isJumping = false;
 
     if (this.ballSprite) {
       this.ballSprite.destroy();
