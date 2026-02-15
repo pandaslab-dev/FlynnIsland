@@ -12,10 +12,13 @@ class GameScene extends Phaser.Scene {
     this.cursors = null;
     this.keys = null;
     this.spaceKey = null;
+    this.shiftKey = null;
 
     this.isJumping = false;
     this.jumpTween = null;
     this.SPEED = 200;
+    this.SPRINT_MULTIPLIER = 1.65;
+    this.JUMP_TRAVEL_DISTANCE = 44;
 
     this.emoteKeys = null;
     this.moveVector = new Phaser.Math.Vector2(0, 0);
@@ -28,7 +31,9 @@ class GameScene extends Phaser.Scene {
     this.joystickVector = new Phaser.Math.Vector2(0, 0);
 
     this.jumpButton = null;
+    this.sprintButton = null;
     this.mobileJumpRequested = false;
+    this.mobileSprintHeld = false;
     this.mobileControlHandlers = null;
     this.mobileControlElements = [];
     this.emoteButtonElements = [];
@@ -162,6 +167,7 @@ class GameScene extends Phaser.Scene {
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys = this.input.keyboard.addKeys('W,A,S,D');
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.shiftKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
 
     this.emoteKeys = this.input.keyboard.addKeys({
       one: Phaser.Input.Keyboard.KeyCodes.ONE,
@@ -785,6 +791,42 @@ class GameScene extends Phaser.Scene {
     return false;
   }
 
+  getIsSprinting() {
+    return Boolean((this.shiftKey && this.shiftKey.isDown) || this.mobileSprintHeld);
+  }
+
+  resolveJumpLandingPosition(startX, startY, directionX, directionY, jumpDistance) {
+    const hasDirection = Math.abs(directionX) > 0.001 || Math.abs(directionY) > 0.001;
+    const jumpVector = new Phaser.Math.Vector2(
+      hasDirection ? directionX : 0,
+      hasDirection ? directionY : -1
+    ).normalize();
+
+    const desiredLandingX = startX + (jumpVector.x * jumpDistance);
+    const desiredLandingY = startY + (jumpVector.y * jumpDistance);
+
+    if (this.canPlayerOccupy(desiredLandingX, desiredLandingY)) {
+      return { x: desiredLandingX, y: desiredLandingY };
+    }
+
+    // Find the furthest valid point along the jump path before obstacles.
+    for (let step = 7; step >= 1; step -= 1) {
+      const t = step / 8;
+      const sampleX = startX + ((desiredLandingX - startX) * t);
+      const sampleY = startY + ((desiredLandingY - startY) * t);
+      if (this.canPlayerOccupy(sampleX, sampleY)) {
+        return { x: sampleX, y: sampleY };
+      }
+    }
+
+    const nearest = this.findNearestWalkablePosition(desiredLandingX, desiredLandingY, 72, 4);
+    if (nearest) {
+      return nearest;
+    }
+
+    return { x: startX, y: startY };
+  }
+
   getViewportFlags() {
     if (window.FlynnViewportScaler && typeof window.FlynnViewportScaler.resolveViewportFlags === 'function') {
       return window.FlynnViewportScaler.resolveViewportFlags(this.scale.width, this.scale.height);
@@ -835,7 +877,7 @@ class GameScene extends Phaser.Scene {
       return false;
     }
 
-    if (!this.joystickBase || !this.jumpButton) {
+    if (!this.joystickBase || !this.jumpButton || !this.sprintButton) {
       return true;
     }
 
@@ -978,6 +1020,7 @@ class GameScene extends Phaser.Scene {
     const baseRadius = Math.round(80 * controlScale);
     const thumbRadius = Math.round(40 * controlScale);
     const jumpRadius = Math.round(60 * controlScale);
+    const sprintRadius = Math.round(44 * controlScale);
     const controlY = viewportHeight - (jumpRadius + 24);
     const sideX = Math.max(baseRadius + 24, viewportWidth * 0.15);
 
@@ -997,6 +1040,8 @@ class GameScene extends Phaser.Scene {
 
     const jumpX = viewportWidth - sideX;
     const jumpY = controlY;
+    const sprintX = jumpX;
+    const sprintY = jumpY - jumpRadius - sprintRadius - Math.round(16 * controlScale);
 
     this.jumpButton = this.add.circle(jumpX, jumpY, jumpRadius, 0x4CAF50, 0.5);
     this.jumpButton.setStrokeStyle(3, 0xffffff, 0.6);
@@ -1016,6 +1061,24 @@ class GameScene extends Phaser.Scene {
     jumpLabel.setDepth(1001);
     this.mobileControlElements.push(this.joystickBase, this.joystickThumb, this.jumpButton, jumpLabel);
 
+    this.sprintButton = this.add.circle(sprintX, sprintY, sprintRadius, 0x0f766e, 0.55);
+    this.sprintButton.setStrokeStyle(3, 0xffffff, 0.6);
+    this.sprintButton.setScrollFactor(0);
+    this.sprintButton.setDepth(1000);
+    this.sprintButton.setInteractive({ useHandCursor: false });
+
+    const sprintLabel = this.add.text(sprintX, sprintY, 'RUN', {
+      fontSize: `${Math.round(18 * controlScale)}px`,
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 3
+    });
+    sprintLabel.setOrigin(0.5, 0.5);
+    sprintLabel.setScrollFactor(0);
+    sprintLabel.setDepth(1001);
+    this.mobileControlElements.push(this.sprintButton, sprintLabel);
+
     this.jumpButton.on('pointerdown', () => {
       this.mobileJumpRequested = true;
       this.jumpButton.setFillStyle(0x66BB6A, 0.75);
@@ -1027,6 +1090,27 @@ class GameScene extends Phaser.Scene {
 
     this.jumpButton.on('pointerout', () => {
       this.jumpButton.setFillStyle(0x4CAF50, 0.5);
+    });
+
+    this.sprintButton.on('pointerdown', () => {
+      this.mobileSprintHeld = true;
+      this.sprintButton.setFillStyle(0x14b8a6, 0.85);
+    });
+
+    this.sprintButton.on('pointerup', () => {
+      this.mobileSprintHeld = false;
+      this.sprintButton.setFillStyle(0x0f766e, 0.55);
+    });
+
+    this.sprintButton.on('pointerupoutside', () => {
+      this.mobileSprintHeld = false;
+      this.sprintButton.setFillStyle(0x0f766e, 0.55);
+    });
+
+    this.sprintButton.on('pointerout', () => {
+      if (!this.mobileSprintHeld) {
+        this.sprintButton.setFillStyle(0x0f766e, 0.55);
+      }
     });
 
     this.mobileControlHandlers = {
@@ -1105,7 +1189,9 @@ class GameScene extends Phaser.Scene {
     this.joystickBase = null;
     this.joystickThumb = null;
     this.jumpButton = null;
+    this.sprintButton = null;
     this.mobileJumpRequested = false;
+    this.mobileSprintHeld = false;
     this.lastMobileControlLayout.width = 0;
     this.lastMobileControlLayout.height = 0;
     this.lastMobileControlLayout.isPortrait = null;
@@ -1173,20 +1259,46 @@ class GameScene extends Phaser.Scene {
 
       const jumpStartY = localPlayer.sprite.y;
       const jumpStartX = localPlayer.sprite.x;
+      const sprintingNow = this.getIsSprinting();
+      const jumpWasDirectional = this.moveVector.lengthSq() > 0;
+      const jumpDistance = this.JUMP_TRAVEL_DISTANCE * (sprintingNow ? 1.15 : 1);
+      const jumpLanding = this.resolveJumpLandingPosition(
+        jumpStartX,
+        jumpStartY,
+        this.moveVector.x,
+        this.moveVector.y,
+        jumpDistance
+      );
+      const jumpApexX = (jumpStartX + jumpLanding.x) / 2;
+      const jumpApexY = Math.min(jumpStartY, jumpLanding.y) - 52;
 
       this.jumpTween = this.tweens.add({
         targets: localPlayer.sprite,
-        y: jumpStartY - 50,
-        duration: 250,
-        yoyo: true,
-        ease: 'Quad.easeOut',
+        x: jumpApexX,
+        y: jumpApexY,
+        duration: 160,
+        ease: 'Sine.easeOut',
         onComplete: () => {
-          this.jumpTween = null;
-          localPlayer.sprite.x = jumpStartX;
-          localPlayer.sprite.y = jumpStartY;
-          this.isJumping = false;
-          this.ensureLocalPlayerOnWalkableGround(localPlayer);
-          this.updateAllPlayerDecorations();
+          this.jumpTween = this.tweens.add({
+            targets: localPlayer.sprite,
+            x: jumpLanding.x,
+            y: jumpLanding.y,
+            duration: 160,
+            ease: 'Sine.easeIn',
+            onComplete: () => {
+              this.jumpTween = null;
+              localPlayer.sprite.x = jumpLanding.x;
+              localPlayer.sprite.y = jumpLanding.y;
+              this.isJumping = false;
+              this.ensureLocalPlayerOnWalkableGround(localPlayer);
+              this.updateAllPlayerDecorations();
+
+              const landingAnimation = jumpWasDirectional
+                ? (sprintingNow ? 'run' : 'walk')
+                : 'stand';
+              this.sendNetworkInput(this.time.now, landingAnimation, true);
+            }
+          });
         }
       });
 
@@ -1251,7 +1363,9 @@ class GameScene extends Phaser.Scene {
 
     localPlayer.sprite.setVelocity(0, 0);
 
-    const moveStep = this.SPEED * (delta / 1000);
+    const isSprinting = this.getIsSprinting() && this.moveVector.lengthSq() > 0;
+    const moveSpeed = this.SPEED * (isSprinting ? this.SPRINT_MULTIPLIER : 1);
+    const moveStep = moveSpeed * (delta / 1000);
     const targetX = localPlayer.sprite.x + (this.moveVector.x * moveStep);
     const targetY = localPlayer.sprite.y + (this.moveVector.y * moveStep);
 
@@ -1271,7 +1385,7 @@ class GameScene extends Phaser.Scene {
     }
 
     if (isMoving) {
-      this.playEntityAnimation(localPlayer, 'walk');
+      this.playEntityAnimation(localPlayer, isSprinting ? 'run' : 'walk');
     } else {
       this.playEntityAnimation(localPlayer, 'stand');
     }
@@ -1281,7 +1395,7 @@ class GameScene extends Phaser.Scene {
     this.interpolateBall(delta);
     this.updateAllPlayerDecorations();
 
-    this.sendNetworkInput(time, isMoving ? 'walk' : 'stand');
+    this.sendNetworkInput(time, isMoving ? (isSprinting ? 'run' : 'walk') : 'stand');
   }
 
   interpolateRemotePlayers(delta) {
