@@ -15,6 +15,8 @@ const SPAWN_Y = 1024;
 const WORLD_WIDTH = 2048;
 const WORLD_HEIGHT = 2048;
 const ISLAND_MASK_PATH = path.resolve(__dirname, '..', 'misc_assets', 'islandedge.png');
+const TOP_GOAL_MASK_PATH = path.resolve(__dirname, '..', 'misc_assets', 'goal_lefttop.png');
+const BOTTOM_GOAL_MASK_PATH = path.resolve(__dirname, '..', 'misc_assets', 'goal_rightbottom.png');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const INDEX_HTML_PATH = path.join(ROOT_DIR, 'index.html');
 const INDEX_BUILD_TOKEN = '__BUILD_ID__';
@@ -38,22 +40,29 @@ const BALL_SPAWN_X = 1024;
 const BALL_SPAWN_Y = 820;
 const WINNING_SCORE = 10;
 const GOAL_EVENT_COOLDOWN_TICKS = 2;
+const GOAL_OPAQUE_ALPHA_THRESHOLD = 16;
+const GOAL_OVERLAP_SCORE_THRESHOLD = 0.5;
+const GOAL_OVERLAP_SAMPLE_STEP = 6;
 
-const TOP_GOAL_ZONE = {
-  x: 749,
-  y: 196,
-  width: 166,
-  height: 63
+const TOP_GOAL_CONFIG = {
+  x: 831.79,
+  y: 227.42,
+  scale: 0.72,
+  maskPath: TOP_GOAL_MASK_PATH
 };
 
-const BOTTOM_GOAL_ZONE = {
-  x: 1264,
-  y: 844,
-  width: 166,
-  height: 63
+const BOTTOM_GOAL_CONFIG = {
+  x: 1347.2,
+  y: 875.89,
+  scale: 0.72,
+  maskPath: BOTTOM_GOAL_MASK_PATH
 };
 
 let islandMask = null;
+let goalMasks = {
+  top: null,
+  bottom: null
+};
 let goalCooldownTicksRemaining = 0;
 
 const ball = {
@@ -178,6 +187,26 @@ function loadIslandMask() {
     islandMask = null;
     console.warn(`Island mask load failed at ${ISLAND_MASK_PATH}; using world bounds fallback.`);
   }
+}
+
+function loadGoalMask(maskPath) {
+  try {
+    const maskBuffer = fs.readFileSync(maskPath);
+    const png = PNG.sync.read(maskBuffer);
+    return {
+      width: png.width,
+      height: png.height,
+      data: png.data
+    };
+  } catch (error) {
+    console.warn(`Goal mask load failed at ${maskPath}; goal scoring for that goal will be disabled.`);
+    return null;
+  }
+}
+
+function loadGoalMasks() {
+  goalMasks.top = loadGoalMask(TOP_GOAL_CONFIG.maskPath);
+  goalMasks.bottom = loadGoalMask(BOTTOM_GOAL_CONFIG.maskPath);
 }
 
 function isBlockedAtWorldPoint(worldX, worldY) {
@@ -337,12 +366,81 @@ function resetBallToCenter() {
   ball.vy = 0;
 }
 
-function circleIntersectsRect(circleX, circleY, radius, rect) {
-  const closestX = clamp(circleX, rect.x, rect.x + rect.width);
-  const closestY = clamp(circleY, rect.y, rect.y + rect.height);
-  const dx = circleX - closestX;
-  const dy = circleY - closestY;
-  return ((dx * dx) + (dy * dy)) <= (radius * radius);
+function getGoalWorldBounds(goalConfig, goalMask) {
+  const halfWidth = (goalMask.width * goalConfig.scale) / 2;
+  const halfHeight = (goalMask.height * goalConfig.scale) / 2;
+
+  return {
+    left: goalConfig.x - halfWidth,
+    right: goalConfig.x + halfWidth,
+    top: goalConfig.y - halfHeight,
+    bottom: goalConfig.y + halfHeight
+  };
+}
+
+function isOpaqueGoalPixelAtWorldPoint(goalConfig, goalMask, worldX, worldY) {
+  if (!goalMask) {
+    return false;
+  }
+
+  const localX = ((worldX - goalConfig.x) / goalConfig.scale) + (goalMask.width / 2);
+  const localY = ((worldY - goalConfig.y) / goalConfig.scale) + (goalMask.height / 2);
+  const pixelX = Math.floor(localX);
+  const pixelY = Math.floor(localY);
+
+  if (
+    pixelX < 0 ||
+    pixelY < 0 ||
+    pixelX >= goalMask.width ||
+    pixelY >= goalMask.height
+  ) {
+    return false;
+  }
+
+  const pixelIndex = ((pixelY * goalMask.width) + pixelX) * 4;
+  const alpha = goalMask.data[pixelIndex + 3];
+  return alpha >= GOAL_OPAQUE_ALPHA_THRESHOLD;
+}
+
+function getBallOverlapRatioWithGoal(goalConfig, goalMask) {
+  if (!goalMask) {
+    return 0;
+  }
+
+  const bounds = getGoalWorldBounds(goalConfig, goalMask);
+  if (
+    (ball.x + ball.radius) < bounds.left ||
+    (ball.x - ball.radius) > bounds.right ||
+    (ball.y + ball.radius) < bounds.top ||
+    (ball.y - ball.radius) > bounds.bottom
+  ) {
+    return 0;
+  }
+
+  const step = GOAL_OVERLAP_SAMPLE_STEP;
+  const radius = ball.radius;
+  const radiusSq = radius * radius;
+  let sampleCount = 0;
+  let overlapCount = 0;
+
+  for (let y = -radius; y <= radius; y += step) {
+    for (let x = -radius; x <= radius; x += step) {
+      if ((x * x) + (y * y) > radiusSq) {
+        continue;
+      }
+
+      sampleCount += 1;
+      if (isOpaqueGoalPixelAtWorldPoint(goalConfig, goalMask, ball.x + x, ball.y + y)) {
+        overlapCount += 1;
+      }
+    }
+  }
+
+  if (sampleCount === 0) {
+    return 0;
+  }
+
+  return overlapCount / sampleCount;
 }
 
 function handleGoalScoring() {
@@ -351,16 +449,23 @@ function handleGoalScoring() {
     return false;
   }
 
-  const topGoalHit = circleIntersectsRect(ball.x, ball.y, ball.radius, TOP_GOAL_ZONE);
-  const bottomGoalHit = circleIntersectsRect(ball.x, ball.y, ball.radius, BOTTOM_GOAL_ZONE);
+  const topGoalOverlap = getBallOverlapRatioWithGoal(TOP_GOAL_CONFIG, goalMasks.top);
+  const bottomGoalOverlap = getBallOverlapRatioWithGoal(BOTTOM_GOAL_CONFIG, goalMasks.bottom);
+  const topGoalHit = topGoalOverlap >= GOAL_OVERLAP_SCORE_THRESHOLD;
+  const bottomGoalHit = bottomGoalOverlap >= GOAL_OVERLAP_SCORE_THRESHOLD;
 
   if (!topGoalHit && !bottomGoalHit) {
     return false;
   }
 
-  if (topGoalHit) {
+  if (topGoalHit && !bottomGoalHit) {
     scores.right += 1;
-  } else if (bottomGoalHit) {
+  } else if (bottomGoalHit && !topGoalHit) {
+    scores.left += 1;
+  } else if (topGoalOverlap >= bottomGoalOverlap) {
+    // Edge case: overlaps both goals in the same tick, prefer deeper penetration.
+    scores.right += 1;
+  } else {
     scores.left += 1;
   }
 
@@ -486,6 +591,7 @@ setInterval(() => {
 }, TICK_RATE_MS);
 
 loadIslandMask();
+loadGoalMasks();
 
 server.listen(PORT, () => {
   console.log(`Flynn Island multiplayer server running on port ${PORT}`);
