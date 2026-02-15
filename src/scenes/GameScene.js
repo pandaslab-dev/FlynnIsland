@@ -74,6 +74,22 @@ class GameScene extends Phaser.Scene {
       hasServerSnapshot: false
     };
     this.BALL_SCALE = 0.18;
+    this.leftScoreText = null;
+    this.rightScoreText = null;
+    this.scoreboardSprite = null;
+    this.topGoalSprite = null;
+    this.bottomGoalSprite = null;
+    this.SCOREBOARD_X = 1462.3;
+    this.SCOREBOARD_Y = 210.23;
+    this.TOP_GOAL_X = 831.79;
+    this.TOP_GOAL_Y = 227.42;
+    this.BOTTOM_GOAL_X = 1347.2;
+    this.BOTTOM_GOAL_Y = 875.89;
+    this.SCOREBOARD_SCALE = 0.9;
+    this.GOAL_SCALE = 0.72;
+    this.LEFT_SCORE_OFFSET_X = -101;
+    this.RIGHT_SCORE_OFFSET_X = 101;
+    this.SCORE_OFFSET_Y = 1;
 
     this.playerData = {
       name: 'Player',
@@ -99,6 +115,9 @@ class GameScene extends Phaser.Scene {
     this.load.image('island', 'misc_assets/island.png');
     this.load.image('islandedge', 'misc_assets/islandedge.png');
     this.load.image('ball', 'misc_assets/ball.png');
+    this.load.image('goal_lefttop', 'misc_assets/goal_lefttop.png');
+    this.load.image('goal_rightbottom', 'misc_assets/goal_rightbottom.png');
+    this.load.image('scoreboard', 'misc_assets/scoreboard.png');
 
     this.DOG_KEYS.forEach((dogKey) => {
       this.loadDogAssets(dogKey);
@@ -122,6 +141,7 @@ class GameScene extends Phaser.Scene {
     this.createDogAnimations();
     this.buildIslandCollisionMask();
     this.createBall();
+    this.createSoccerMiniGameDecorations();
 
     this.setupNetworkBridge();
 
@@ -209,6 +229,65 @@ class GameScene extends Phaser.Scene {
     );
     this.ballSprite.setScale(this.BALL_SCALE);
     this.ballSprite.setDepth(60);
+  }
+
+  createSoccerMiniGameDecorations() {
+    this.scoreboardSprite = this.add.image(this.SCOREBOARD_X, this.SCOREBOARD_Y, 'scoreboard');
+    this.scoreboardSprite.setOrigin(0.5, 0.5);
+    this.scoreboardSprite.setScale(this.SCOREBOARD_SCALE);
+    this.scoreboardSprite.setDepth(15);
+
+    this.topGoalSprite = this.add.image(this.TOP_GOAL_X, this.TOP_GOAL_Y, 'goal_lefttop');
+    this.topGoalSprite.setOrigin(0.5, 0.5);
+    this.topGoalSprite.setScale(this.GOAL_SCALE);
+    this.topGoalSprite.setDepth(12);
+
+    this.bottomGoalSprite = this.add.image(this.BOTTOM_GOAL_X, this.BOTTOM_GOAL_Y, 'goal_rightbottom');
+    this.bottomGoalSprite.setOrigin(0.5, 0.5);
+    this.bottomGoalSprite.setScale(this.GOAL_SCALE);
+    this.bottomGoalSprite.setDepth(12);
+
+    const scoreTextStyle = {
+      fontSize: '56px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 6,
+      align: 'center',
+      shadow: {
+        offsetX: 0,
+        offsetY: 0,
+        color: '#000000',
+        blur: 4,
+        fill: true
+      }
+    };
+
+    this.leftScoreText = this.add.text(0, 0, '0', scoreTextStyle);
+    this.leftScoreText.setOrigin(0.5, 0.5);
+    this.leftScoreText.setDepth(16);
+
+    this.rightScoreText = this.add.text(0, 0, '0', scoreTextStyle);
+    this.rightScoreText.setOrigin(0.5, 0.5);
+    this.rightScoreText.setDepth(16);
+
+    this.updateScoreTextPositionsFromScoreboard();
+  }
+
+  updateScoreTextPositionsFromScoreboard() {
+    if (!this.scoreboardSprite || !this.leftScoreText || !this.rightScoreText) {
+      return;
+    }
+
+    this.leftScoreText.setPosition(
+      this.scoreboardSprite.x + this.LEFT_SCORE_OFFSET_X,
+      this.scoreboardSprite.y + this.SCORE_OFFSET_Y
+    );
+
+    this.rightScoreText.setPosition(
+      this.scoreboardSprite.x + this.RIGHT_SCORE_OFFSET_X,
+      this.scoreboardSprite.y + this.SCORE_OFFSET_Y
+    );
   }
 
   applyBallState(ballSnapshot) {
@@ -504,6 +583,14 @@ class GameScene extends Phaser.Scene {
   applyWorldState(worldState) {
     if (worldState && typeof worldState === 'object' && worldState.ball) {
       this.applyBallState(worldState.ball);
+    }
+    if (worldState && typeof worldState === 'object' && worldState.scores) {
+      if (this.leftScoreText && Number.isFinite(worldState.scores.left)) {
+        this.leftScoreText.setText(String(worldState.scores.left));
+      }
+      if (this.rightScoreText && Number.isFinite(worldState.scores.right)) {
+        this.rightScoreText.setText(String(worldState.scores.right));
+      }
     }
 
     const playersSnapshot = Array.isArray(worldState)

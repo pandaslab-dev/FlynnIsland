@@ -36,8 +36,25 @@ const BALL_BOUNCE_DAMPING = 0.82;
 const BALL_FRICTION = 0.989;
 const BALL_SPAWN_X = 1024;
 const BALL_SPAWN_Y = 820;
+const WINNING_SCORE = 10;
+const GOAL_EVENT_COOLDOWN_TICKS = 2;
+
+const TOP_GOAL_ZONE = {
+  x: 749,
+  y: 196,
+  width: 166,
+  height: 63
+};
+
+const BOTTOM_GOAL_ZONE = {
+  x: 1264,
+  y: 844,
+  width: 166,
+  height: 63
+};
 
 let islandMask = null;
+let goalCooldownTicksRemaining = 0;
 
 const ball = {
   x: BALL_SPAWN_X,
@@ -45,6 +62,11 @@ const ball = {
   vx: 0,
   vy: 0,
   radius: BALL_RADIUS
+};
+
+const scores = {
+  left: 0,
+  right: 0
 };
 
 const app = express();
@@ -308,6 +330,50 @@ function simulateBall(dt) {
   }
 }
 
+function resetBallToCenter() {
+  ball.x = BALL_SPAWN_X;
+  ball.y = BALL_SPAWN_Y;
+  ball.vx = 0;
+  ball.vy = 0;
+}
+
+function circleIntersectsRect(circleX, circleY, radius, rect) {
+  const closestX = clamp(circleX, rect.x, rect.x + rect.width);
+  const closestY = clamp(circleY, rect.y, rect.y + rect.height);
+  const dx = circleX - closestX;
+  const dy = circleY - closestY;
+  return ((dx * dx) + (dy * dy)) <= (radius * radius);
+}
+
+function handleGoalScoring() {
+  if (goalCooldownTicksRemaining > 0) {
+    goalCooldownTicksRemaining -= 1;
+    return false;
+  }
+
+  const topGoalHit = circleIntersectsRect(ball.x, ball.y, ball.radius, TOP_GOAL_ZONE);
+  const bottomGoalHit = circleIntersectsRect(ball.x, ball.y, ball.radius, BOTTOM_GOAL_ZONE);
+
+  if (!topGoalHit && !bottomGoalHit) {
+    return false;
+  }
+
+  if (topGoalHit) {
+    scores.right += 1;
+  } else if (bottomGoalHit) {
+    scores.left += 1;
+  }
+
+  if (scores.left >= WINNING_SCORE || scores.right >= WINNING_SCORE) {
+    scores.left = 0;
+    scores.right = 0;
+  }
+
+  resetBallToCenter();
+  goalCooldownTicksRemaining = GOAL_EVENT_COOLDOWN_TICKS;
+  return true;
+}
+
 function serializePlayer(player) {
   return {
     id: player.id,
@@ -319,6 +385,24 @@ function serializePlayer(player) {
     flipX: player.flipX,
     emote: player.emote
   };
+}
+
+function emitWorldState() {
+  const playerSnapshot = Object.values(players).map((player) => serializePlayer(player));
+  io.emit('world:state', {
+    players: playerSnapshot,
+    ball: {
+      x: ball.x,
+      y: ball.y,
+      vx: ball.vx,
+      vy: ball.vy,
+      radius: ball.radius
+    },
+    scores: {
+      left: scores.left,
+      right: scores.right
+    }
+  });
 }
 
 io.on('connection', (socket) => {
@@ -390,18 +474,9 @@ io.on('connection', (socket) => {
 
 setInterval(() => {
   simulateBall(TICK_SECONDS);
+  handleGoalScoring();
 
-  const playerSnapshot = Object.values(players).map((player) => serializePlayer(player));
-  io.emit('world:state', {
-    players: playerSnapshot,
-    ball: {
-      x: ball.x,
-      y: ball.y,
-      vx: ball.vx,
-      vy: ball.vy,
-      radius: ball.radius
-    }
-  });
+  emitWorldState();
 
   Object.values(players).forEach((player) => {
     if (player.emote) {
