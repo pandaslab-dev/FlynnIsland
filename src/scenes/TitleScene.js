@@ -9,6 +9,7 @@ class TitleScene extends Phaser.Scene {
     super({ key: 'TitleScene' });  // Scene identifier
     this.logo = null;
     this.playButton = null;
+    this.muteButton = null;
     this.playButtonScales = {
       base: 0.3,
       hover: 0.35,
@@ -28,6 +29,7 @@ class TitleScene extends Phaser.Scene {
     // Add sky blue background
     this.cameras.main.setBackgroundColor('#87CEEB');
 
+    this.initializeAudioState();
     this.ensureBackgroundMusic();
     
     // Add logo at top center
@@ -78,6 +80,7 @@ class TitleScene extends Phaser.Scene {
       });
     });
 
+    this.createMuteButton();
     this.layoutScene();
     this.resizeHandler = () => this.layoutScene();
     this.scale.on('resize', this.resizeHandler);
@@ -168,6 +171,11 @@ class TitleScene extends Phaser.Scene {
       this.logo.setPosition(centerX, logoY);
       this.playButton.setPosition(centerX, buttonY);
     }
+
+    if (this.muteButton) {
+      const muteMargin = isPhone ? 16 : 18;
+      this.muteButton.setPosition(this.scale.width - muteMargin, muteMargin);
+    }
   }
 
   handleSceneShutdown() {
@@ -211,5 +219,48 @@ class TitleScene extends Phaser.Scene {
     }
 
     playMusic();
+  }
+
+  initializeAudioState() {
+    if (typeof window.flynnMusicMuted === 'undefined') {
+      window.flynnMusicMuted = true;
+    }
+
+    this.sound.mute = Boolean(window.flynnMusicMuted);
+  }
+
+  createMuteButton() {
+    this.muteButton = this.add.text(0, 0, '', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '20px',
+      color: '#ffffff',
+      padding: { x: 14, y: 8 }
+    });
+    this.muteButton.setOrigin(1, 0);
+    this.muteButton.setDepth(100);
+    this.muteButton.setInteractive({ useHandCursor: true });
+
+    this.muteButton.on('pointerdown', () => {
+      this.sound.mute = !this.sound.mute;
+      window.flynnMusicMuted = this.sound.mute;
+      this.refreshMuteButtonLabel();
+    });
+
+    this.muteButton.on('pointerover', () => {
+      this.muteButton.setAlpha(1);
+    });
+
+    this.muteButton.on('pointerout', () => {
+      this.muteButton.setAlpha(0.92);
+    });
+
+    this.refreshMuteButtonLabel();
+    this.muteButton.setAlpha(0.92);
+  }
+
+  refreshMuteButtonLabel() {
+    const isMuted = this.sound.mute;
+    this.muteButton.setText(isMuted ? 'Muted' : 'Music On');
+    this.muteButton.setBackgroundColor(isMuted ? 'rgba(90, 90, 90, 0.72)' : 'rgba(90, 90, 90, 0.55)');
   }
 }
