@@ -552,8 +552,37 @@ function tryBoardAvailableCar(player, now) {
   bestCandidate.occupantId = player.id;
   player.lastExitedCarId = null;
   player.lastExitedCarUntil = 0;
+  player.exitWalkStartedAt = 0;
+  player.exitWalkUntil = 0;
+  player.exitWalkStartX = player.x;
+  player.exitWalkStartY = player.y;
+  player.exitWalkTargetX = player.x;
+  player.exitWalkTargetY = player.y;
   syncPlayerToCar(player, bestCandidate);
   return true;
+}
+
+function resolveExitWalkTarget(exitPosition, preferredDirectionX, preferredDirectionY) {
+  if (!exitPosition) {
+    return null;
+  }
+
+  const length = Math.hypot(preferredDirectionX, preferredDirectionY) || 1;
+  const directionX = preferredDirectionX / length;
+  const directionY = preferredDirectionY / length;
+  const walkDistance = 52;
+  const desiredX = clamp(
+    exitPosition.x + (directionX * walkDistance),
+    WORLD_BOUNDS.x,
+    (WORLD_BOUNDS.x + WORLD_WIDTH) - 1
+  );
+  const desiredY = clamp(
+    exitPosition.y + (directionY * walkDistance),
+    WORLD_BOUNDS.y,
+    (WORLD_BOUNDS.y + WORLD_HEIGHT) - 1
+  );
+
+  return findNearestWalkablePosition(desiredX, desiredY, 72, 4) || exitPosition;
 }
 
 function releasePlayerFromCar(player, now) {
@@ -598,6 +627,8 @@ function releasePlayerFromCar(player, now) {
   ];
 
   let exitPosition = null;
+  let exitDirectionX = -forward.x;
+  let exitDirectionY = -forward.y;
   for (const offset of candidateOffsets) {
     const candidateX = clamp(car.x + offset.x, WORLD_BOUNDS.x, (WORLD_BOUNDS.x + WORLD_WIDTH) - 1);
     const candidateY = clamp(car.y + offset.y, WORLD_BOUNDS.y, (WORLD_BOUNDS.y + WORLD_HEIGHT) - 1);
@@ -605,9 +636,13 @@ function releasePlayerFromCar(player, now) {
 
     if (nearestWalkable) {
       exitPosition = nearestWalkable;
+      exitDirectionX = nearestWalkable.x - car.x;
+      exitDirectionY = nearestWalkable.y - car.y;
       break;
     }
   }
+
+  const exitWalkTarget = resolveExitWalkTarget(exitPosition, exitDirectionX, exitDirectionY);
 
   car.occupantId = null;
   player.carId = null;
@@ -619,18 +654,25 @@ function releasePlayerFromCar(player, now) {
     steer: 0,
     boost: false
   };
-  player.reboardEnabledAt = now + 1100;
+  player.reboardEnabledAt = now + 1400;
   player.lastExitedCarId = previousCarId;
-  player.lastExitedCarUntil = now + 1600;
+  player.lastExitedCarUntil = now + 2200;
   player.vx = 0;
   player.vy = 0;
-  player.animation = 'stand';
-  player.flipX = forward.x < 0;
+  player.animation = 'walk';
+  player.flipX = exitDirectionX < 0;
 
   if (exitPosition) {
     player.x = exitPosition.x;
     player.y = exitPosition.y;
   }
+
+  player.exitWalkStartedAt = now;
+  player.exitWalkUntil = now + 260;
+  player.exitWalkStartX = player.x;
+  player.exitWalkStartY = player.y;
+  player.exitWalkTargetX = exitWalkTarget?.x ?? player.x;
+  player.exitWalkTargetY = exitWalkTarget?.y ?? player.y;
 
   return true;
 }
@@ -850,7 +892,13 @@ io.on('connection', (socket) => {
       exitCarRequested: false,
       reboardEnabledAt: 0,
       lastExitedCarId: null,
-      lastExitedCarUntil: 0
+      lastExitedCarUntil: 0,
+      exitWalkStartedAt: 0,
+      exitWalkUntil: 0,
+      exitWalkStartX: spawnPoint.x,
+      exitWalkStartY: spawnPoint.y,
+      exitWalkTargetX: spawnPoint.x,
+      exitWalkTargetY: spawnPoint.y
     };
   });
 
@@ -872,6 +920,37 @@ io.on('connection', (socket) => {
       player.animation = 'sit';
       player.flipX = false;
       return;
+    }
+
+    if (now < (player.exitWalkUntil || 0)) {
+      const durationMs = Math.max((player.exitWalkUntil || now) - (player.exitWalkStartedAt || now), 1);
+      const progress = clamp((now - (player.exitWalkStartedAt || now)) / durationMs, 0, 1);
+      const nextX = player.exitWalkStartX + ((player.exitWalkTargetX - player.exitWalkStartX) * progress);
+      const nextY = player.exitWalkStartY + ((player.exitWalkTargetY - player.exitWalkStartY) * progress);
+      const elapsedSeconds = clamp((now - previousInputAt) / 1000, 0.016, 0.2) || 0.016;
+      const rawVx = (nextX - player.x) / elapsedSeconds;
+      const rawVy = (nextY - player.y) / elapsedSeconds;
+      const clampedVelocity = clampVectorMagnitude(rawVx, rawVy, MAX_PLAYER_SPEED);
+
+      player.x = nextX;
+      player.y = nextY;
+      player.vx = clampedVelocity.vx;
+      player.vy = clampedVelocity.vy;
+      player.animation = 'walk';
+      player.flipX = (player.exitWalkTargetX - player.exitWalkStartX) < 0;
+      player.carInput.throttle = 0;
+      player.carInput.steer = 0;
+      player.carInput.directionX = 0;
+      player.carInput.directionY = 0;
+      player.carInput.boost = false;
+      return;
+    }
+
+    if (player.exitWalkUntil) {
+      player.x = player.exitWalkTargetX;
+      player.y = player.exitWalkTargetY;
+      player.exitWalkStartedAt = 0;
+      player.exitWalkUntil = 0;
     }
 
     const elapsedSeconds = clamp((now - previousInputAt) / 1000, 0.016, 0.2) || 0.016;
