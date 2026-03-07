@@ -7,6 +7,7 @@
 class TitleScene extends Phaser.Scene {
   constructor() {
     super({ key: 'TitleScene' });
+    this.backgroundImage = null;
     this.logo = null;
     this.playButton = null;
     this.muteButton = null;
@@ -23,13 +24,20 @@ class TitleScene extends Phaser.Scene {
   }
 
   preload() {
+    if (window.FlynnMenuBackground && typeof window.FlynnMenuBackground.preload === 'function') {
+      window.FlynnMenuBackground.preload(this);
+    }
+
     this.load.image('logo', 'misc_assets/logo.png');
     this.load.image('playnow', 'misc_assets/playnow.png');
     this.load.audio('background_music', 'misc_assets/music.mp3');
   }
 
   create() {
-    this.cameras.main.setBackgroundColor('#87CEEB');
+    this.cameras.main.setBackgroundColor('#0f172a');
+    if (window.FlynnMenuBackground && typeof window.FlynnMenuBackground.create === 'function') {
+      this.backgroundImage = window.FlynnMenuBackground.create(this);
+    }
 
     this.initializeAudioState();
     this.ensureBackgroundMusic();
@@ -129,6 +137,10 @@ class TitleScene extends Phaser.Scene {
   layoutScene() {
     if (!this.logo || !this.playButton || !this.volumeLabel || !this.volumeTrack || !this.volumeHandle) {
       return;
+    }
+
+    if (this.backgroundImage && window.FlynnMenuBackground && typeof window.FlynnMenuBackground.layout === 'function') {
+      window.FlynnMenuBackground.layout(this, this.backgroundImage);
     }
 
     const centerX = this.scale.width / 2;

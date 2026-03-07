@@ -7,6 +7,7 @@
 class NameInputScene extends Phaser.Scene {
   constructor() {
     super({ key: 'NameInputScene' });
+    this.backgroundImage = null;
     this.playerName = '';  // Stores the entered name
     this.isMobileInputFocused = false;
     this.dialog = null;
@@ -15,13 +16,19 @@ class NameInputScene extends Phaser.Scene {
   }
   
   preload() {
+    if (window.FlynnMenuBackground && typeof window.FlynnMenuBackground.preload === 'function') {
+      window.FlynnMenuBackground.preload(this);
+    }
+
     // Load dialog background image
     this.load.image('enternamedialog', 'misc_assets/enternamedialog.png');
   }
   
   create() {
-    // Set sky blue background
-    this.cameras.main.setBackgroundColor('#87CEEB');
+    this.cameras.main.setBackgroundColor('#0f172a');
+    if (window.FlynnMenuBackground && typeof window.FlynnMenuBackground.create === 'function') {
+      this.backgroundImage = window.FlynnMenuBackground.create(this);
+    }
     
     // Add dialog background at center of screen
     this.dialog = this.add.image(0, 0, 'enternamedialog');
@@ -175,6 +182,10 @@ class NameInputScene extends Phaser.Scene {
   layoutScene() {
     if (!this.dialog || !this.continueButton) {
       return;
+    }
+
+    if (this.backgroundImage && window.FlynnMenuBackground && typeof window.FlynnMenuBackground.layout === 'function') {
+      window.FlynnMenuBackground.layout(this, this.backgroundImage);
     }
 
     const centerX = this.scale.width / 2;

@@ -7,6 +7,7 @@
 class DogSelectScene extends Phaser.Scene {
   constructor() {
     super({ key: 'DogSelectScene' });
+    this.backgroundImage = null;
     this.playerName = '';
     this.titleImage = null;
     this.dogButtons = [];
@@ -24,6 +25,10 @@ class DogSelectScene extends Phaser.Scene {
   }
   
   preload() {
+    if (window.FlynnMenuBackground && typeof window.FlynnMenuBackground.preload === 'function') {
+      window.FlynnMenuBackground.preload(this);
+    }
+
     this.load.image('choosedog_top', 'misc_assets/choosedog-top.png');
     this.load.image('choosedog_alice', 'misc_assets/choosedog-alice.png');
     this.load.image('choosedog_remix', 'misc_assets/choosedog-remix.png');
@@ -32,7 +37,10 @@ class DogSelectScene extends Phaser.Scene {
   }
   
   create() {
-    this.cameras.main.setBackgroundColor('#87CEEB');
+    this.cameras.main.setBackgroundColor('#0f172a');
+    if (window.FlynnMenuBackground && typeof window.FlynnMenuBackground.create === 'function') {
+      this.backgroundImage = window.FlynnMenuBackground.create(this);
+    }
     this.clearLingeringNameInput();
 
     this.titleImage = this.add.image(0, 0, 'choosedog_top');
@@ -180,6 +188,10 @@ class DogSelectScene extends Phaser.Scene {
   layoutScene() {
     if (!this.titleImage || this.dogButtons.length === 0) {
       return;
+    }
+
+    if (this.backgroundImage && window.FlynnMenuBackground && typeof window.FlynnMenuBackground.layout === 'function') {
+      window.FlynnMenuBackground.layout(this, this.backgroundImage);
     }
 
     const flags = this.getViewportFlags();

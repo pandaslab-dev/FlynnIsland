@@ -34,6 +34,7 @@ function getLoadingRacingConfig() {
 class LoadingScene extends Phaser.Scene {
   constructor() {
     super({ key: 'LoadingScene' });
+    this.backgroundImage = null;
     this.playerName = '';
     this.dogType = 'Remix';
     this.resizeHandler = null;
@@ -54,6 +55,8 @@ class LoadingScene extends Phaser.Scene {
 
   preload() {
     this.setupLoadingUi();
+    this.layoutScene();
+    this.updateProgressVisuals(this.progressValue);
 
     const worldConfig = getLoadingWorldConfig();
     const racingConfig = getLoadingRacingConfig();
@@ -80,7 +83,11 @@ class LoadingScene extends Phaser.Scene {
   }
 
   setupLoadingUi() {
-    this.cameras.main.setBackgroundColor('#87CEEB');
+    this.cameras.main.setBackgroundColor('#0f172a');
+
+    if (!this.backgroundImage && window.FlynnMenuBackground && typeof window.FlynnMenuBackground.create === 'function') {
+      this.backgroundImage = window.FlynnMenuBackground.create(this);
+    }
 
     if (!this.logo) {
       if (this.textures.exists('logo')) {
@@ -147,6 +154,10 @@ class LoadingScene extends Phaser.Scene {
       return;
     }
 
+    if (this.backgroundImage && window.FlynnMenuBackground && typeof window.FlynnMenuBackground.layout === 'function') {
+      window.FlynnMenuBackground.layout(this, this.backgroundImage);
+    }
+
     const centerX = this.scale.width / 2;
     const centerY = this.scale.height / 2;
     const isPortrait = this.scale.height > this.scale.width;
@@ -161,8 +172,8 @@ class LoadingScene extends Phaser.Scene {
       this.logo.setScale(logoScale);
     }
 
-    const logoY = centerY - (isPortrait ? 94 : 82);
-    const textY = centerY + (isPortrait ? 34 : 24);
+    const logoY = centerY - (isPortrait ? 116 : 98);
+    const textY = centerY + (isPortrait ? 72 : 58);
     const barWidth = Phaser.Math.Clamp(this.scale.width * (isPortrait ? 0.68 : 0.42), 240, 460);
 
     this.logo.setPosition(centerX, logoY);
