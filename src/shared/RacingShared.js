@@ -15,6 +15,14 @@
       return Math.max(min, Math.min(max, value));
     }
 
+    function moveTowards(current, target, maxDelta) {
+      if (current < target) {
+        return Math.min(current + maxDelta, target);
+      }
+
+      return Math.max(current - maxDelta, target);
+    }
+
     function normalizeAngle(angle) {
       let nextAngle = angle;
 
@@ -272,7 +280,21 @@
       const physics = racingConfig.physics || {};
       const throttle = clamp(Number.isFinite(inputState?.throttle) ? inputState.throttle : 0, -1, 1);
       const steer = clamp(Number.isFinite(inputState?.steer) ? inputState.steer : 0, -1, 1);
-      const boost = Boolean(inputState?.boost) && throttle > 0.25;
+      const rawDirectionX = Number.isFinite(inputState?.directionX)
+        ? inputState.directionX
+        : Number.isFinite(inputState?.moveX)
+          ? inputState.moveX
+          : 0;
+      const rawDirectionY = Number.isFinite(inputState?.directionY)
+        ? inputState.directionY
+        : Number.isFinite(inputState?.moveY)
+          ? inputState.moveY
+          : 0;
+      const directionMagnitude = Math.hypot(rawDirectionX, rawDirectionY);
+      const hasDirectionalInput = directionMagnitude > 0.08;
+      const directionX = hasDirectionalInput ? rawDirectionX / directionMagnitude : 0;
+      const directionY = hasDirectionalInput ? rawDirectionY / directionMagnitude : 0;
+      const boost = Boolean(inputState?.boost) && (hasDirectionalInput || throttle > 0.25);
 
       if (!Number.isFinite(car.x)) {
         car.x = carDefinition.spawn?.x || 0;
@@ -298,56 +320,119 @@
 
       car.spinOutTimerMs = Math.max(0, car.spinOutTimerMs - (dtSeconds * 1000));
 
-      const oldForward = getForwardVector(car.angle);
-      const oldRight = getRightVector(car.angle);
+      if (hasDirectionalInput) {
+        const targetSpeed = directionMagnitude * (boost ? (physics.boostMaxSpeed || 720) : (physics.maxSpeed || 470));
+        const targetVx = directionX * targetSpeed;
+        const targetVy = directionY * targetSpeed;
+        const acceleration = boost ? (physics.boostAcceleration || 920) : (physics.acceleration || 680);
+        const velocityDeltaX = targetVx - car.vx;
+        const velocityDeltaY = targetVy - car.vy;
+        const velocityDelta = Math.hypot(velocityDeltaX, velocityDeltaY);
+        const maxVelocityStep = acceleration * dtSeconds;
 
-      let forwardSpeed = (car.vx * oldForward.x) + (car.vy * oldForward.y);
-      let lateralSpeed = (car.vx * oldRight.x) + (car.vy * oldRight.y);
-      const normalizedSpeed = clamp(Math.abs(forwardSpeed) / Math.max(physics.maxSpeed || 1, 1), 0, 1);
+        if (velocityDelta <= maxVelocityStep || velocityDelta === 0) {
+          car.vx = targetVx;
+          car.vy = targetVy;
+        } else {
+          car.vx += (velocityDeltaX / velocityDelta) * maxVelocityStep;
+          car.vy += (velocityDeltaY / velocityDelta) * maxVelocityStep;
+        }
+      } else {
+        const legacyDriveRequested = Math.abs(throttle) > 0.001 || Math.abs(steer) > 0.001;
+
+        if (legacyDriveRequested) {
+          const oldForward = getForwardVector(car.angle);
+          const oldRight = getRightVector(car.angle);
+
+          let forwardSpeed = (car.vx * oldForward.x) + (car.vy * oldForward.y);
+          let lateralSpeed = (car.vx * oldRight.x) + (car.vy * oldRight.y);
+          const normalizedSpeed = clamp(Math.abs(forwardSpeed) / Math.max(physics.maxSpeed || 1, 1), 0, 1);
+
+          if (car.spinOutTimerMs > 0) {
+            car.angle = normalizeAngle(car.angle + (car.angularVelocity * dtSeconds));
+          } else {
+            let turnDirection = 1;
+            if (forwardSpeed < -18) {
+              turnDirection = -(physics.reverseTurnMultiplier || 0.72);
+            }
+
+            const turnStrength = clamp(0.18 + normalizedSpeed, 0.18, 1);
+            const steeringRate = physics.steeringRate || 2.5;
+            car.angle = normalizeAngle(
+              car.angle + (steer * steeringRate * turnStrength * turnDirection * dtSeconds)
+            );
+            car.angularVelocity += steer * (physics.steeringAngularImpulse || 3.4) * turnStrength * dtSeconds;
+          }
+
+          if (throttle > 0) {
+            forwardSpeed += throttle * (boost ? (physics.boostAcceleration || 920) : (physics.acceleration || 680)) * dtSeconds;
+          } else if (throttle < 0) {
+            forwardSpeed += throttle * (physics.reverseAcceleration || 420) * dtSeconds;
+          }
+
+          const topForwardSpeed = boost ? (physics.boostMaxSpeed || 720) : (physics.maxSpeed || 470);
+          forwardSpeed = clamp(forwardSpeed, -(physics.reverseMaxSpeed || 190), topForwardSpeed);
+
+          const drag = throttle === 0 ? (physics.coastDrag || 2.8) : (physics.drag || 1.8);
+          forwardSpeed *= Math.max(0, 1 - (drag * dtSeconds));
+
+          const lateralGrip = car.spinOutTimerMs > 0
+            ? (physics.spinOutGrip || 1.6)
+            : (physics.lateralGrip || 7.5);
+          lateralSpeed *= Math.max(0, 1 - (lateralGrip * dtSeconds));
+
+          const nextForward = getForwardVector(car.angle);
+          const nextRight = getRightVector(car.angle);
+
+          car.vx = (nextForward.x * forwardSpeed) + (nextRight.x * lateralSpeed);
+          car.vy = (nextForward.y * forwardSpeed) + (nextRight.y * lateralSpeed);
+        } else {
+          const currentSpeed = Math.hypot(car.vx, car.vy);
+          const coastDeceleration = physics.coastDeceleration || 980;
+          const nextSpeed = moveTowards(currentSpeed, 0, coastDeceleration * dtSeconds);
+
+          if (currentSpeed > 0.0001 && nextSpeed >= 0) {
+            const scale = nextSpeed / currentSpeed;
+            car.vx *= scale;
+            car.vy *= scale;
+          } else {
+            car.vx = 0;
+            car.vy = 0;
+          }
+        }
+      }
 
       if (car.spinOutTimerMs > 0) {
         car.angle = normalizeAngle(car.angle + (car.angularVelocity * dtSeconds));
       } else {
-        let turnDirection = 1;
-        if (forwardSpeed < -18) {
-          turnDirection = -(physics.reverseTurnMultiplier || 0.72);
+        const headingSourceX = hasDirectionalInput ? directionX : car.vx;
+        const headingSourceY = hasDirectionalInput ? directionY : car.vy;
+        const headingMagnitude = Math.hypot(headingSourceX, headingSourceY);
+
+        if (headingMagnitude > 0.001) {
+          const targetAngle = Math.atan2(headingSourceY, headingSourceX);
+          const angleToTarget = angleDelta(car.angle, targetAngle);
+          const maxTurnStep = (physics.directionalTurnSpeed || 8.8) * dtSeconds;
+          const appliedTurn = clamp(angleToTarget, -maxTurnStep, maxTurnStep);
+          const targetAngularVelocity = appliedTurn / Math.max(dtSeconds, 0.0001);
+          const turnResponse = clamp((physics.directionalTurnResponsiveness || 18) * dtSeconds, 0, 1);
+
+          car.angle = normalizeAngle(car.angle + appliedTurn);
+          car.angularVelocity += (targetAngularVelocity - car.angularVelocity) * turnResponse;
         }
 
-        const turnStrength = clamp(0.18 + normalizedSpeed, 0.18, 1);
-        const steeringRate = physics.steeringRate || 2.5;
-        car.angle = normalizeAngle(
-          car.angle + (steer * steeringRate * turnStrength * turnDirection * dtSeconds)
-        );
-        car.angularVelocity += steer * (physics.steeringAngularImpulse || 3.4) * turnStrength * dtSeconds;
+        // In arcade mode, keep heading stable instead of carrying rotational momentum.
+        car.angularVelocity = 0;
       }
-
-      if (throttle > 0) {
-        forwardSpeed += throttle * (boost ? (physics.boostAcceleration || 920) : (physics.acceleration || 680)) * dtSeconds;
-      } else if (throttle < 0) {
-        forwardSpeed += throttle * (physics.reverseAcceleration || 420) * dtSeconds;
-      }
-
-      const topForwardSpeed = boost ? (physics.boostMaxSpeed || 720) : (physics.maxSpeed || 470);
-      forwardSpeed = clamp(forwardSpeed, -(physics.reverseMaxSpeed || 190), topForwardSpeed);
-
-      const drag = throttle === 0 ? (physics.coastDrag || 2.8) : (physics.drag || 1.8);
-      forwardSpeed *= Math.max(0, 1 - (drag * dtSeconds));
-
-      const lateralGrip = car.spinOutTimerMs > 0
-        ? (physics.spinOutGrip || 1.6)
-        : (physics.lateralGrip || 7.5);
-      lateralSpeed *= Math.max(0, 1 - (lateralGrip * dtSeconds));
 
       const angularDamping = car.spinOutTimerMs > 0
         ? (physics.spinOutAngularDamping || 1.2)
         : (physics.angularDamping || 4.2);
-      car.angularVelocity *= Math.max(0, 1 - (angularDamping * dtSeconds));
-
-      const nextForward = getForwardVector(car.angle);
-      const nextRight = getRightVector(car.angle);
-
-      car.vx = (nextForward.x * forwardSpeed) + (nextRight.x * lateralSpeed);
-      car.vy = (nextForward.y * forwardSpeed) + (nextRight.y * lateralSpeed);
+      if (car.spinOutTimerMs > 0) {
+        car.angularVelocity *= Math.max(0, 1 - (angularDamping * dtSeconds));
+      } else {
+        car.angularVelocity = 0;
+      }
 
       const speed = Math.hypot(car.vx, car.vy);
       const stepDistance = speed * dtSeconds;

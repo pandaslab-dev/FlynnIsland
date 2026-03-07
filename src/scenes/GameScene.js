@@ -553,6 +553,10 @@ class GameScene extends Phaser.Scene {
     return this.carDefinitionMap.get(carId) || null;
   }
 
+  getCarRenderAngle(angle = 0) {
+    return Phaser.Math.Angle.Wrap(angle + Math.PI);
+  }
+
   createRacingEntities() {
     if (!this.carDefinitions.length) {
       return;
@@ -593,7 +597,7 @@ class GameScene extends Phaser.Scene {
     let carEntity = this.cars[snapshot.id];
     const initialX = snapshot.x ?? definition.spawn?.x ?? 0;
     const initialY = snapshot.y ?? definition.spawn?.y ?? 0;
-    const initialAngle = snapshot.angle ?? definition.spawn?.angle ?? 0;
+    const initialAngle = this.getCarRenderAngle(snapshot.angle ?? definition.spawn?.angle ?? 0);
 
     if (!carEntity) {
       const sprite = this.add.image(initialX, initialY, definition.textureKey);
@@ -627,7 +631,9 @@ class GameScene extends Phaser.Scene {
 
     carEntity.targetX = typeof snapshot.x === 'number' ? snapshot.x : carEntity.targetX;
     carEntity.targetY = typeof snapshot.y === 'number' ? snapshot.y : carEntity.targetY;
-    carEntity.targetAngle = typeof snapshot.angle === 'number' ? snapshot.angle : carEntity.targetAngle;
+    carEntity.targetAngle = typeof snapshot.angle === 'number'
+      ? this.getCarRenderAngle(snapshot.angle)
+      : carEntity.targetAngle;
     carEntity.targetSpeed = Number.isFinite(snapshot.speed) ? snapshot.speed : carEntity.targetSpeed;
     carEntity.targetTurnRate = Number.isFinite(snapshot.turnRate) ? snapshot.turnRate : carEntity.targetTurnRate;
     carEntity.occupantId = snapshot.occupantId || null;
@@ -2098,6 +2104,8 @@ class GameScene extends Phaser.Scene {
       x: localPlayer.sprite.x,
       y: localPlayer.sprite.y,
       flipX: isDriving ? false : localPlayer.sprite.flipX,
+      carDirectionX: isDriving ? Phaser.Math.Clamp(this.moveVector.x, -1, 1) : 0,
+      carDirectionY: isDriving ? Phaser.Math.Clamp(this.moveVector.y, -1, 1) : 0,
       carThrottle: isDriving ? Phaser.Math.Clamp(this.moveVector.y, -1, 1) : 0,
       carSteer: isDriving ? Phaser.Math.Clamp(this.moveVector.x, -1, 1) : 0,
       carBoost: isDriving ? this.getIsSprinting() : false,

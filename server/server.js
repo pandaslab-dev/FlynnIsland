@@ -534,6 +534,8 @@ function tryBoardAvailableCar(player, now) {
   player.animation = 'sit';
   player.flipX = false;
   player.carInput = {
+    directionX: 0,
+    directionY: 0,
     throttle: 0,
     steer: 0,
     boost: false
@@ -599,6 +601,8 @@ function releasePlayerFromCar(player, now) {
   player.carId = null;
   player.exitCarRequested = false;
   player.carInput = {
+    directionX: 0,
+    directionY: 0,
     throttle: 0,
     steer: 0,
     boost: false
@@ -619,6 +623,24 @@ function releasePlayerFromCar(player, now) {
 
 function sanitizeCarInput(payload = {}) {
   return {
+    directionX: clamp(
+      Number.isFinite(payload.carDirectionX)
+        ? payload.carDirectionX
+        : Number.isFinite(payload.moveX)
+          ? payload.moveX
+          : 0,
+      -1,
+      1
+    ),
+    directionY: clamp(
+      Number.isFinite(payload.carDirectionY)
+        ? payload.carDirectionY
+        : Number.isFinite(payload.moveY)
+          ? payload.moveY
+          : 0,
+      -1,
+      1
+    ),
     throttle: clamp(
       Number.isFinite(payload.carThrottle)
         ? payload.carThrottle
@@ -697,6 +719,8 @@ function updateCars(dtSeconds, now) {
     }
 
     const inputState = driver?.carInput || {
+      directionX: 0,
+      directionY: 0,
       throttle: 0,
       steer: 0,
       boost: false
@@ -803,6 +827,8 @@ io.on('connection', (socket) => {
       lastInputAt: Date.now(),
       carId: null,
       carInput: {
+        directionX: 0,
+        directionY: 0,
         throttle: 0,
         steer: 0,
         boost: false
@@ -847,6 +873,8 @@ io.on('connection', (socket) => {
     player.animation = sanitizeAnimation(payload.animation);
     player.carInput.throttle = 0;
     player.carInput.steer = 0;
+    player.carInput.directionX = 0;
+    player.carInput.directionY = 0;
     player.carInput.boost = false;
 
     if (typeof payload.flipX === 'boolean') {
