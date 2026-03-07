@@ -33,6 +33,7 @@ class DogSelectScene extends Phaser.Scene {
   
   create() {
     this.cameras.main.setBackgroundColor('#87CEEB');
+    this.clearLingeringNameInput();
 
     this.titleImage = this.add.image(0, 0, 'choosedog_top');
 
@@ -71,6 +72,22 @@ class DogSelectScene extends Phaser.Scene {
 
     this.events.once('shutdown', this.handleSceneShutdown, this);
     this.events.once('destroy', this.handleSceneShutdown, this);
+  }
+
+  clearLingeringNameInput() {
+    const activeElement = document.activeElement;
+    if (activeElement && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+
+    document.querySelectorAll('#nameInput').forEach((element) => {
+      element.style.pointerEvents = 'none';
+      element.style.visibility = 'hidden';
+
+      if (element.parentNode) {
+        element.parentNode.removeChild(element);
+      }
+    });
   }
   
   createDogButton(dogData) {

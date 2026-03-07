@@ -11,6 +11,7 @@ class NameInputScene extends Phaser.Scene {
     this.isMobileInputFocused = false;
     this.dialog = null;
     this.continueButton = null;
+    this.transitioningToDogSelect = false;
   }
   
   preload() {
@@ -45,27 +46,8 @@ class NameInputScene extends Phaser.Scene {
     this.continueButton.setInteractive({ useHandCursor: false });
     this.continueButton.disableInteractive();  // Can't click until name is entered
     
-    // CLICK handler for Continue button
     this.continueButton.on('pointerdown', () => {
-      // Only proceed if name is valid
-      if (this.playerName.trim().length > 0) {
-        // Remove HTML input before transitioning
-        this.removeHTMLInput();
-        
-        // Visual feedback - quick scale animation
-        this.tweens.add({
-          targets: this.continueButton,
-          scaleX: 0.95,
-          scaleY: 0.95,
-          duration: 50,
-          yoyo: true,
-          onComplete: () => {
-            // Pass player name to DogSelectScene
-            // Second parameter is data object that next scene receives in init()
-            this.scene.start('DogSelectScene', { playerName: this.playerName });
-          }
-        });
-      }
+      this.beginDogSelectTransition();
     });
 
     this.layoutScene();
@@ -79,6 +61,7 @@ class NameInputScene extends Phaser.Scene {
   createHTMLInput() {
     // Phaser doesn't have native text input, so we create an HTML input element
     // and position it over the canvas
+    this.removeLingeringNameInputs();
     
     const inputElement = document.createElement('input');
     inputElement.type = 'text';
@@ -98,6 +81,7 @@ class NameInputScene extends Phaser.Scene {
     inputElement.style.backgroundColor = 'transparent';  // See-through background
     inputElement.style.color = '#000000';                // Black text
     inputElement.style.outline = 'none';                 // Remove blue focus ring
+    inputElement.style.zIndex = '20';
     
     // Add input to the page
     document.body.appendChild(inputElement);
@@ -111,7 +95,7 @@ class NameInputScene extends Phaser.Scene {
     // Allow Enter key to submit
     inputElement.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && this.playerName.trim().length > 0) {
-        this.continueButton.emit('pointerdown');  // Trigger click handler
+        this.beginDogSelectTransition();
       }
     });
 
@@ -241,9 +225,54 @@ class NameInputScene extends Phaser.Scene {
     
     // Clean up HTML element when leaving scene
     if (this.htmlInput && this.htmlInput.parentNode) {
+      if (document.activeElement === this.htmlInput) {
+        this.htmlInput.blur();
+      }
+
+      this.htmlInput.style.pointerEvents = 'none';
+      this.htmlInput.style.visibility = 'hidden';
+      this.htmlInput.disabled = true;
       this.htmlInput.parentNode.removeChild(this.htmlInput);
       this.htmlInput = null;
     }
+
+    this.removeLingeringNameInputs();
+  }
+
+  removeLingeringNameInputs() {
+    document.querySelectorAll('#nameInput').forEach((element) => {
+      if (document.activeElement === element && typeof element.blur === 'function') {
+        element.blur();
+      }
+
+      element.style.pointerEvents = 'none';
+      element.style.visibility = 'hidden';
+
+      if (element.parentNode) {
+        element.parentNode.removeChild(element);
+      }
+    });
+  }
+
+  beginDogSelectTransition() {
+    if (this.transitioningToDogSelect || this.playerName.trim().length === 0) {
+      return;
+    }
+
+    this.transitioningToDogSelect = true;
+    this.continueButton.disableInteractive();
+    this.removeHTMLInput();
+
+    this.tweens.add({
+      targets: this.continueButton,
+      scaleX: 0.95,
+      scaleY: 0.95,
+      duration: 50,
+      yoyo: true,
+      onComplete: () => {
+        this.scene.start('DogSelectScene', { playerName: this.playerName });
+      }
+    });
   }
   
   updateContinueButton() {
