@@ -30,12 +30,44 @@ const FALLBACK_ISLAND_WORLD_CONFIG = Object.freeze({
   })
 });
 
+const FALLBACK_RACING_CONFIG = Object.freeze({
+  trackMask: Object.freeze({
+    imagePath: 'misc_assets/racing/racetrack-mask.png',
+    blockedColorThreshold: 12
+  }),
+  cars: Object.freeze([]),
+  physics: Object.freeze({
+    trailLifetimeMs: 2600,
+    trailMinDistance: 12,
+    trailMinSpeed: 170,
+    trailTurnThreshold: 0.45,
+    trailAlpha: 0.4,
+    trailWidth: 2
+  })
+});
+
 function getIslandWorldConfig() {
   if (window.FlynnIslandWorldConfig && window.FlynnIslandWorldConfig.worldBounds) {
     return window.FlynnIslandWorldConfig;
   }
 
   return FALLBACK_ISLAND_WORLD_CONFIG;
+}
+
+function getRacingConfig() {
+  if (window.FlynnRacingConfig && Array.isArray(window.FlynnRacingConfig.cars)) {
+    return window.FlynnRacingConfig;
+  }
+
+  return FALLBACK_RACING_CONFIG;
+}
+
+function getRacingShared() {
+  if (window.FlynnRacingShared) {
+    return window.FlynnRacingShared;
+  }
+
+  return null;
 }
 
 class GameScene extends Phaser.Scene {
@@ -52,6 +84,8 @@ class GameScene extends Phaser.Scene {
 
     this.isJumping = false;
     this.jumpTween = null;
+    this.pendingCarExitRequest = false;
+    this.PLAYER_SCALE = 0.3;
     this.SPEED = 200;
     this.SPRINT_MULTIPLIER = 1.65;
     this.JUMP_TRAVEL_DISTANCE = 44;
@@ -74,6 +108,8 @@ class GameScene extends Phaser.Scene {
 
     this.jumpButton = null;
     this.sprintButton = null;
+    this.jumpButtonLabel = null;
+    this.sprintButtonLabel = null;
     this.mobileJumpRequested = false;
     this.mobileSprintHeld = false;
     this.mobileControlHandlers = null;
@@ -89,7 +125,7 @@ class GameScene extends Phaser.Scene {
 
     this.network = null;
     this.lastInputSentAt = 0;
-    this.NETWORK_SEND_INTERVAL_MS = 50;
+    this.NETWORK_SEND_INTERVAL_MS = 33;
 
     this.DOG_KEYS = ['alice', 'remix', 'sapphire', 'wendy'];
     this.DOG_LABELS = {
@@ -99,6 +135,10 @@ class GameScene extends Phaser.Scene {
       wendy: 'Wendy'
     };
     this.worldConfig = getIslandWorldConfig();
+    this.racingConfig = getRacingConfig();
+    this.racingShared = getRacingShared();
+    this.carDefinitions = Array.isArray(this.racingConfig.cars) ? this.racingConfig.cars : [];
+    this.carDefinitionMap = new Map(this.carDefinitions.map((definition) => [definition.id, definition]));
     this.spawnPoint = {
       x: this.worldConfig.spawn.x,
       y: this.worldConfig.spawn.y
@@ -114,6 +154,11 @@ class GameScene extends Phaser.Scene {
     this.islandMaskPixels = null;
     this.islandMaskWidth = 0;
     this.islandMaskHeight = 0;
+    this.cars = {};
+    this.tireTrackGraphics = null;
+    this.tireTrackSegments = [];
+    this.carExitHintText = null;
+    this.currentControlMode = 'foot';
 
     this.playerData = {
       name: 'Player',
@@ -148,6 +193,13 @@ class GameScene extends Phaser.Scene {
     this.DOG_KEYS.forEach((dogKey) => {
       this.loadDogAssets(dogKey);
     });
+
+    this.carDefinitions.forEach((definition) => {
+      this.load.image(
+        definition.textureKey,
+        definition.requestPath || definition.imagePath
+      );
+    });
   }
 
   create() {
@@ -175,6 +227,7 @@ class GameScene extends Phaser.Scene {
 
     this.createDogAnimations();
     this.buildIslandCollisionMask();
+    this.createRacingEntities();
     this.spawnPoint = this.resolveInitialSpawnPoint();
     this.localLastSafePosition = {
       x: this.spawnPoint.x,
@@ -213,6 +266,8 @@ class GameScene extends Phaser.Scene {
 
     this.createEmoteButtons();
     this.createMobileControls();
+    this.updateControlModeUi();
+    this.updateCarExitHintPosition();
 
     this.resizeHandler = () => this.handleViewportResize();
     this.scale.on('resize', this.resizeHandler);
@@ -223,6 +278,7 @@ class GameScene extends Phaser.Scene {
 
   loadDogAssets(dogKey) {
     this.load.image(`${dogKey}_stand`, `sprites/dogs/${dogKey}/${dogKey}_stand.png`);
+    this.load.image(`${dogKey}_sit`, `sprites/dogs/${dogKey}/${dogKey}_sit.png`);
     this.load.image(`${dogKey}_walk1`, `sprites/dogs/${dogKey}/${dogKey}_walk1.png`);
     this.load.image(`${dogKey}_walk2`, `sprites/dogs/${dogKey}/${dogKey}_walk2.png`);
     this.load.image(`${dogKey}_walk3`, `sprites/dogs/${dogKey}/${dogKey}_walk3.png`);
@@ -493,6 +549,370 @@ class GameScene extends Phaser.Scene {
     return this.DOG_LABELS[dogKey] || this.DOG_LABELS.remix;
   }
 
+  getCarDefinition(carId) {
+    return this.carDefinitionMap.get(carId) || null;
+  }
+
+  createRacingEntities() {
+    if (!this.carDefinitions.length) {
+      return;
+    }
+
+    if (!this.tireTrackGraphics) {
+      this.tireTrackGraphics = this.add.graphics();
+      this.tireTrackGraphics.setDepth(6);
+    }
+
+    this.carDefinitions.forEach((definition) => {
+      this.addOrUpdateCar({
+        id: definition.id,
+        x: definition.spawn?.x ?? 0,
+        y: definition.spawn?.y ?? 0,
+        angle: definition.spawn?.angle ?? 0,
+        occupantId: null,
+        speed: 0,
+        turnRate: 0,
+        isBoosting: false,
+        isSpinningOut: false
+      }, true);
+    });
+
+    this.createCarExitHintText();
+  }
+
+  addOrUpdateCar(snapshot, snapToPosition = false) {
+    if (!snapshot?.id) {
+      return null;
+    }
+
+    const definition = this.getCarDefinition(snapshot.id);
+    if (!definition) {
+      return null;
+    }
+
+    let carEntity = this.cars[snapshot.id];
+    const initialX = snapshot.x ?? definition.spawn?.x ?? 0;
+    const initialY = snapshot.y ?? definition.spawn?.y ?? 0;
+    const initialAngle = snapshot.angle ?? definition.spawn?.angle ?? 0;
+
+    if (!carEntity) {
+      const sprite = this.add.image(initialX, initialY, definition.textureKey);
+      sprite.setScale(definition.display?.scale ?? 0.4);
+      sprite.setOrigin(definition.display?.originX ?? 0.5, definition.display?.originY ?? 0.5);
+      sprite.setRotation(initialAngle);
+
+      carEntity = {
+        id: snapshot.id,
+        sprite,
+        x: initialX,
+        y: initialY,
+        angle: initialAngle,
+        targetX: initialX,
+        targetY: initialY,
+        targetAngle: initialAngle,
+        speed: snapshot.speed || 0,
+        targetSpeed: snapshot.speed || 0,
+        turnRate: snapshot.turnRate || 0,
+        targetTurnRate: snapshot.turnRate || 0,
+        occupantId: snapshot.occupantId || null,
+        isBoosting: Boolean(snapshot.isBoosting),
+        isSpinningOut: Boolean(snapshot.isSpinningOut),
+        lastTrailAnchors: null
+      };
+
+      this.cars[snapshot.id] = carEntity;
+      this.applyCarTransform(carEntity, true);
+      return carEntity;
+    }
+
+    carEntity.targetX = typeof snapshot.x === 'number' ? snapshot.x : carEntity.targetX;
+    carEntity.targetY = typeof snapshot.y === 'number' ? snapshot.y : carEntity.targetY;
+    carEntity.targetAngle = typeof snapshot.angle === 'number' ? snapshot.angle : carEntity.targetAngle;
+    carEntity.targetSpeed = Number.isFinite(snapshot.speed) ? snapshot.speed : carEntity.targetSpeed;
+    carEntity.targetTurnRate = Number.isFinite(snapshot.turnRate) ? snapshot.turnRate : carEntity.targetTurnRate;
+    carEntity.occupantId = snapshot.occupantId || null;
+    carEntity.isBoosting = Boolean(snapshot.isBoosting);
+    carEntity.isSpinningOut = Boolean(snapshot.isSpinningOut);
+
+    if (snapToPosition) {
+      carEntity.sprite.setPosition(carEntity.targetX, carEntity.targetY);
+      carEntity.sprite.setRotation(carEntity.targetAngle);
+      carEntity.speed = carEntity.targetSpeed;
+      carEntity.turnRate = carEntity.targetTurnRate;
+      this.applyCarTransform(carEntity, true);
+      carEntity.lastTrailAnchors = null;
+    }
+
+    return carEntity;
+  }
+
+  removeCar(carId) {
+    const carEntity = this.cars[carId];
+    if (!carEntity) {
+      return;
+    }
+
+    if (carEntity.sprite) {
+      carEntity.sprite.destroy();
+    }
+
+    delete this.cars[carId];
+  }
+
+  createCarExitHintText() {
+    if (this.carExitHintText) {
+      this.carExitHintText.destroy();
+    }
+
+    this.carExitHintText = this.add.text(0, 0, 'Jump to exit car', {
+      fontSize: '22px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 5,
+      align: 'center'
+    });
+    this.carExitHintText.setOrigin(0.5, 0.5);
+    this.carExitHintText.setScrollFactor(0);
+    this.carExitHintText.setDepth(3200);
+    this.carExitHintText.setAlpha(0);
+    this.updateCarExitHintPosition();
+  }
+
+  updateCarExitHintPosition() {
+    if (!this.carExitHintText) {
+      return;
+    }
+
+    const hintY = this.sys.game.device.input.touch ? 72 : 52;
+    this.carExitHintText.setPosition(this.scale.width / 2, hintY);
+  }
+
+  showCarExitHint() {
+    if (!this.carExitHintText) {
+      return;
+    }
+
+    this.tweens.killTweensOf(this.carExitHintText);
+    this.carExitHintText.setAlpha(0);
+    this.carExitHintText.setY(this.sys.game.device.input.touch ? 84 : 64);
+
+    this.tweens.add({
+      targets: this.carExitHintText,
+      alpha: 1,
+      y: this.sys.game.device.input.touch ? 72 : 52,
+      duration: 180,
+      ease: 'Power2',
+      onComplete: () => {
+        this.tweens.add({
+          targets: this.carExitHintText,
+          alpha: 0,
+          y: this.carExitHintText.y - 10,
+          delay: 1200,
+          duration: 650,
+          ease: 'Power2'
+        });
+      }
+    });
+  }
+
+  updateControlModeUi() {
+    const localPlayer = this.getLocalPlayer();
+    const nextMode = localPlayer && localPlayer.carId ? 'car' : 'foot';
+    this.currentControlMode = nextMode;
+
+    if (this.jumpButtonLabel) {
+      this.jumpButtonLabel.setText(nextMode === 'car' ? 'EXIT' : 'JUMP');
+    }
+
+    if (this.sprintButtonLabel) {
+      this.sprintButtonLabel.setText(nextMode === 'car' ? 'BOOST' : 'RUN');
+    }
+  }
+
+  applyCarTransform(carEntity, snapTrailAnchor = false) {
+    if (!carEntity?.sprite) {
+      return;
+    }
+
+    const definition = this.getCarDefinition(carEntity.id);
+    carEntity.sprite.setScale(definition?.display?.scale ?? 0.4);
+    carEntity.sprite.setOrigin(definition?.display?.originX ?? 0.5, definition?.display?.originY ?? 0.5);
+    carEntity.sprite.setDepth(carEntity.sprite.y + 8);
+
+    carEntity.x = carEntity.sprite.x;
+    carEntity.y = carEntity.sprite.y;
+    carEntity.angle = carEntity.sprite.rotation;
+
+    if (snapTrailAnchor && this.racingShared && typeof this.racingShared.computeTrailAnchors === 'function') {
+      carEntity.lastTrailAnchors = this.racingShared.computeTrailAnchors({
+        x: carEntity.x,
+        y: carEntity.y,
+        angle: carEntity.angle
+      }, definition);
+    }
+  }
+
+  applyOnFootSpriteState(playerEntity) {
+    if (!playerEntity?.sprite) {
+      return;
+    }
+
+    if (playerEntity.currentPose !== 'foot') {
+      playerEntity.sprite.setRotation(0);
+      playerEntity.sprite.setOrigin(0.5, 0.5);
+      playerEntity.sprite.setScale(this.PLAYER_SCALE);
+      playerEntity.currentPose = 'foot';
+    }
+
+    playerEntity.sprite.setDepth(playerEntity.sprite.y + 20);
+  }
+
+  applyCarSeatedState(playerEntity, carEntity) {
+    if (!playerEntity?.sprite || !carEntity?.sprite || !this.racingShared) {
+      return;
+    }
+
+    const definition = this.getCarDefinition(carEntity.id);
+    if (!definition) {
+      return;
+    }
+
+    const seatPose = this.racingShared.computeSeatPose({
+      x: carEntity.sprite.x,
+      y: carEntity.sprite.y,
+      angle: carEntity.sprite.rotation
+    }, definition);
+
+    playerEntity.sprite.anims.stop();
+    playerEntity.sprite.setTexture(`${playerEntity.dogKey}_sit`);
+    playerEntity.sprite.setOrigin(seatPose.originX, seatPose.originY);
+    playerEntity.sprite.setScale(seatPose.scale);
+    playerEntity.sprite.setRotation(seatPose.rotation);
+    playerEntity.sprite.setPosition(seatPose.x, seatPose.y);
+    playerEntity.sprite.setFlipX(Boolean(definition.seat?.flipX));
+    playerEntity.sprite.setDepth(carEntity.sprite.depth + 2);
+    playerEntity.currentPose = 'car';
+  }
+
+  shouldSnapLocalPlayerToSnapshot(playerEntity, snapshot) {
+    if (!playerEntity || typeof snapshot?.x !== 'number' || typeof snapshot?.y !== 'number') {
+      return false;
+    }
+
+    const distance = Phaser.Math.Distance.Between(
+      playerEntity.sprite.x,
+      playerEntity.sprite.y,
+      snapshot.x,
+      snapshot.y
+    );
+
+    return distance > 56;
+  }
+
+  applyLocalPlayerSnapshot(playerEntity, snapshot) {
+    const previousCarId = playerEntity.carId;
+    playerEntity.serverAnimation = typeof snapshot.animation === 'string'
+      ? snapshot.animation
+      : playerEntity.serverAnimation;
+    playerEntity.remoteAnimation = playerEntity.serverAnimation;
+    playerEntity.carId = snapshot.carId || null;
+
+    if (typeof snapshot.x === 'number' && typeof snapshot.y === 'number') {
+      playerEntity.serverX = snapshot.x;
+      playerEntity.serverY = snapshot.y;
+      playerEntity.targetX = snapshot.x;
+      playerEntity.targetY = snapshot.y;
+    }
+
+    if (playerEntity.carId) {
+      if (!previousCarId) {
+        if (this.jumpTween) {
+          this.jumpTween.stop();
+          this.jumpTween = null;
+        }
+        this.isJumping = false;
+        this.pendingCarExitRequest = false;
+        this.showCarExitHint();
+      }
+
+      if (typeof snapshot.x === 'number' && typeof snapshot.y === 'number') {
+        playerEntity.sprite.setPosition(snapshot.x, snapshot.y);
+      }
+
+      return;
+    }
+
+    if (previousCarId && !playerEntity.carId) {
+      this.applyOnFootSpriteState(playerEntity);
+    }
+
+    if (typeof snapshot.flipX === 'boolean') {
+      playerEntity.sprite.setFlipX(snapshot.flipX);
+    }
+
+    if (this.shouldSnapLocalPlayerToSnapshot(playerEntity, snapshot)) {
+      playerEntity.sprite.setPosition(snapshot.x, snapshot.y);
+      this.localLastSafePosition.x = snapshot.x;
+      this.localLastSafePosition.y = snapshot.y;
+    }
+  }
+
+  applyPlayerSnapshot(playerEntity, snapshot) {
+    if (!playerEntity || !snapshot) {
+      return;
+    }
+
+    if (playerEntity.isLocal) {
+      this.applyLocalPlayerSnapshot(playerEntity, snapshot);
+      return;
+    }
+
+    playerEntity.remoteAnimation = typeof snapshot.animation === 'string'
+      ? snapshot.animation
+      : playerEntity.remoteAnimation;
+    playerEntity.serverAnimation = playerEntity.remoteAnimation;
+    playerEntity.carId = snapshot.carId || null;
+
+    if (typeof snapshot.x === 'number' && typeof snapshot.y === 'number') {
+      playerEntity.targetX = snapshot.x;
+      playerEntity.targetY = snapshot.y;
+      playerEntity.serverX = snapshot.x;
+      playerEntity.serverY = snapshot.y;
+    }
+
+    if (!playerEntity.carId) {
+      if (typeof snapshot.flipX === 'boolean') {
+        playerEntity.sprite.setFlipX(snapshot.flipX);
+      }
+
+      if (typeof snapshot.animation === 'string') {
+        this.playEntityAnimation(playerEntity, snapshot.animation);
+      }
+    }
+  }
+
+  syncPlayersToCars() {
+    Object.values(this.players).forEach((playerEntity) => {
+      if (playerEntity.carId) {
+        const carEntity = this.cars[playerEntity.carId];
+        if (carEntity) {
+          this.applyCarSeatedState(playerEntity, carEntity);
+          return;
+        }
+
+        playerEntity.carId = null;
+      }
+
+      if (playerEntity.currentPose === 'car') {
+        this.playEntityAnimation(
+          playerEntity,
+          playerEntity.serverAnimation || playerEntity.remoteAnimation || 'stand'
+        );
+      }
+    });
+  }
+
   addOrUpdatePlayer(playerData) {
     const playerId = playerData.id;
     if (!playerId) {
@@ -512,10 +932,11 @@ class GameScene extends Phaser.Scene {
         spawnY,
         `${dogKey}_stand`
       );
-      sprite.setScale(0.3);
+      sprite.setScale(this.PLAYER_SCALE);
       sprite.setCollideWorldBounds(false);
       sprite.body.setSize(150, 150);
       sprite.body.setOffset(180, 180);
+      sprite.setOrigin(0.5, 0.5);
 
       const playerNameText = this.add.text(
         sprite.x,
@@ -558,7 +979,12 @@ class GameScene extends Phaser.Scene {
         isLocal: Boolean(playerData.isLocal),
         targetX: sprite.x,
         targetY: sprite.y,
-        remoteAnimation: 'stand'
+        remoteAnimation: 'stand',
+        serverAnimation: 'stand',
+        serverX: sprite.x,
+        serverY: sprite.y,
+        carId: null,
+        currentPose: 'foot'
       };
 
       this.players[playerId] = playerEntity;
@@ -568,12 +994,14 @@ class GameScene extends Phaser.Scene {
 
       if (playerEntity.dogKey !== dogKey) {
         playerEntity.dogKey = dogKey;
-        playerEntity.sprite.setTexture(`${dogKey}_stand`);
+        playerEntity.sprite.setTexture(`${dogKey}_${playerEntity.carId ? 'sit' : 'stand'}`);
       }
 
       if (typeof playerData.x === 'number' && typeof playerData.y === 'number') {
         playerEntity.targetX = playerData.x;
         playerEntity.targetY = playerData.y;
+        playerEntity.serverX = playerData.x;
+        playerEntity.serverY = playerData.y;
       }
     }
 
@@ -584,12 +1012,24 @@ class GameScene extends Phaser.Scene {
       playerEntity.sprite.setFlipX(playerData.flipX);
     }
 
-    if (typeof playerData.x === 'number' && typeof playerData.y === 'number' && playerEntity.isLocal) {
+    if (
+      typeof playerData.x === 'number' &&
+      typeof playerData.y === 'number' &&
+      (playerData.snapToPosition || (!playerEntity.isLocal))
+    ) {
       playerEntity.sprite.setPosition(playerData.x, playerData.y);
+    }
+
+    if (typeof playerData.x === 'number' && typeof playerData.y === 'number' && playerEntity.isLocal) {
       playerEntity.targetX = playerData.x;
       playerEntity.targetY = playerData.y;
-      this.localLastSafePosition.x = playerData.x;
-      this.localLastSafePosition.y = playerData.y;
+      playerEntity.serverX = playerData.x;
+      playerEntity.serverY = playerData.y;
+
+      if (playerData.snapToPosition) {
+        this.localLastSafePosition.x = playerData.x;
+        this.localLastSafePosition.y = playerData.y;
+      }
     }
 
     this.updatePlayerDecorations(playerEntity);
@@ -619,8 +1059,27 @@ class GameScene extends Phaser.Scene {
       : Array.isArray(worldState?.players)
         ? worldState.players
         : [];
+    const carsSnapshot = Array.isArray(worldState?.cars)
+      ? worldState.cars
+      : [];
 
     const activeIds = new Set();
+    const activeCarIds = new Set();
+
+    carsSnapshot.forEach((snapshot) => {
+      if (!snapshot?.id) {
+        return;
+      }
+
+      activeCarIds.add(snapshot.id);
+      this.addOrUpdateCar(snapshot);
+    });
+
+    Object.keys(this.cars).forEach((carId) => {
+      if (!activeCarIds.has(carId)) {
+        this.removeCar(carId);
+      }
+    });
 
     playersSnapshot.forEach((snapshot) => {
       if (!snapshot || !snapshot.id) {
@@ -630,12 +1089,6 @@ class GameScene extends Phaser.Scene {
       activeIds.add(snapshot.id);
 
       const isLocalPlayer = snapshot.id === this.localPlayerId;
-      if (isLocalPlayer) {
-        // Local player is currently client-driven; skip snapshot correction
-        // to avoid jitter/rubber-banding until reconciliation is implemented.
-        return;
-      }
-
       const playerEntity = this.addOrUpdatePlayer({
         id: snapshot.id,
         name: snapshot.name,
@@ -643,17 +1096,15 @@ class GameScene extends Phaser.Scene {
         x: snapshot.x,
         y: snapshot.y,
         flipX: snapshot.flipX,
-        isLocal: false
+        isLocal: isLocalPlayer,
+        snapToPosition: !isLocalPlayer
       });
 
       if (!playerEntity) {
         return;
       }
 
-      if (!isLocalPlayer && typeof snapshot.animation === 'string') {
-        playerEntity.remoteAnimation = snapshot.animation;
-        this.playEntityAnimation(playerEntity, snapshot.animation);
-      }
+      this.applyPlayerSnapshot(playerEntity, snapshot);
 
       if (snapshot.emote) {
         this.showEmoteForPlayer(snapshot.id, snapshot.emote);
@@ -684,6 +1135,14 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
+    this.applyOnFootSpriteState(playerEntity);
+
+    if (animationState === 'sit') {
+      playerEntity.sprite.anims.stop();
+      playerEntity.sprite.setTexture(`${playerEntity.dogKey}_sit`);
+      return;
+    }
+
     if (animationState === 'walk') {
       playerEntity.sprite.play(this.getAnimationKey(playerEntity, 'walk'), true);
       return;
@@ -701,6 +1160,135 @@ class GameScene extends Phaser.Scene {
 
     playerEntity.sprite.anims.stop();
     playerEntity.sprite.setTexture(`${playerEntity.dogKey}_stand`);
+  }
+
+  interpolateCars(delta) {
+    const baseSmoothing = Phaser.Math.Clamp((delta / 1000) * 10, 0, 1);
+
+    Object.values(this.cars).forEach((carEntity) => {
+      const isLocalDriven = carEntity.occupantId === this.localPlayerId;
+      const smoothing = isLocalDriven
+        ? Phaser.Math.Clamp((delta / 1000) * 18, 0, 1)
+        : baseSmoothing;
+
+      carEntity.sprite.x = Phaser.Math.Linear(carEntity.sprite.x, carEntity.targetX, smoothing);
+      carEntity.sprite.y = Phaser.Math.Linear(carEntity.sprite.y, carEntity.targetY, smoothing);
+
+      if (this.racingShared && typeof this.racingShared.lerpAngle === 'function') {
+        carEntity.sprite.rotation = this.racingShared.lerpAngle(
+          carEntity.sprite.rotation,
+          carEntity.targetAngle,
+          smoothing
+        );
+      } else {
+        carEntity.sprite.rotation = carEntity.targetAngle;
+      }
+
+      carEntity.speed = Phaser.Math.Linear(carEntity.speed || 0, carEntity.targetSpeed || 0, smoothing);
+      carEntity.turnRate = Phaser.Math.Linear(carEntity.turnRate || 0, carEntity.targetTurnRate || 0, smoothing);
+      this.applyCarTransform(carEntity);
+    });
+  }
+
+  recordTireTracks(carEntity, time) {
+    if (!this.tireTrackGraphics || !this.racingShared) {
+      return;
+    }
+
+    const definition = this.getCarDefinition(carEntity.id);
+    if (!definition) {
+      return;
+    }
+
+    const currentAnchors = this.racingShared.computeTrailAnchors({
+      x: carEntity.sprite.x,
+      y: carEntity.sprite.y,
+      angle: carEntity.sprite.rotation
+    }, definition);
+
+    if (!carEntity.lastTrailAnchors) {
+      carEntity.lastTrailAnchors = currentAnchors;
+      return;
+    }
+
+    const trailDistance = Phaser.Math.Distance.Between(
+      currentAnchors.left.x,
+      currentAnchors.left.y,
+      carEntity.lastTrailAnchors.left.x,
+      carEntity.lastTrailAnchors.left.y
+    );
+
+    if (trailDistance > 120) {
+      carEntity.lastTrailAnchors = currentAnchors;
+      return;
+    }
+
+    const trailConfig = this.racingConfig.physics || FALLBACK_RACING_CONFIG.physics;
+    const shouldDrawTrail =
+      (carEntity.speed || 0) >= (trailConfig.trailMinSpeed || 170) &&
+      (
+        Math.abs(carEntity.turnRate || 0) >= (trailConfig.trailTurnThreshold || 0.45) ||
+        carEntity.isBoosting ||
+        carEntity.isSpinningOut
+      );
+
+    if (shouldDrawTrail && trailDistance >= (trailConfig.trailMinDistance || 12)) {
+      this.tireTrackSegments.push({
+        x1: carEntity.lastTrailAnchors.left.x,
+        y1: carEntity.lastTrailAnchors.left.y,
+        x2: currentAnchors.left.x,
+        y2: currentAnchors.left.y,
+        createdAt: time
+      });
+      this.tireTrackSegments.push({
+        x1: carEntity.lastTrailAnchors.right.x,
+        y1: carEntity.lastTrailAnchors.right.y,
+        x2: currentAnchors.right.x,
+        y2: currentAnchors.right.y,
+        createdAt: time
+      });
+    }
+
+    carEntity.lastTrailAnchors = currentAnchors;
+  }
+
+  redrawTireTracks(time) {
+    if (!this.tireTrackGraphics) {
+      return;
+    }
+
+    const trailConfig = this.racingConfig.physics || FALLBACK_RACING_CONFIG.physics;
+    const trailLifetimeMs = trailConfig.trailLifetimeMs || 2600;
+    const trailAlpha = trailConfig.trailAlpha || 0.4;
+    const trailWidth = trailConfig.trailWidth || 2;
+
+    this.tireTrackSegments = this.tireTrackSegments.filter((segment) => {
+      return (time - segment.createdAt) <= trailLifetimeMs;
+    });
+
+    this.tireTrackGraphics.clear();
+
+    this.tireTrackSegments.forEach((segment) => {
+      const age = time - segment.createdAt;
+      const alpha = trailAlpha * Math.max(0, 1 - (age / trailLifetimeMs));
+      if (alpha <= 0) {
+        return;
+      }
+
+      this.tireTrackGraphics.lineStyle(trailWidth, 0xd9d9d9, alpha);
+      this.tireTrackGraphics.beginPath();
+      this.tireTrackGraphics.moveTo(segment.x1, segment.y1);
+      this.tireTrackGraphics.lineTo(segment.x2, segment.y2);
+      this.tireTrackGraphics.strokePath();
+    });
+  }
+
+  updateTireTracks(time) {
+    Object.values(this.cars).forEach((carEntity) => {
+      this.recordTireTracks(carEntity, time);
+    });
+
+    this.redrawTireTracks(time);
   }
 
   findNearestWalkablePosition(startX, startY, maxRadius = 140, radiusStep = 6) {
@@ -890,10 +1478,13 @@ class GameScene extends Phaser.Scene {
   handleViewportResize() {
     this.updateCameraZoom();
     this.createEmoteButtons();
+    this.updateCarExitHintPosition();
 
     if (this.shouldRebuildMobileControls()) {
       this.createMobileControls();
     }
+
+    this.updateControlModeUi();
   }
 
   shouldRebuildMobileControls() {
@@ -1083,6 +1674,7 @@ class GameScene extends Phaser.Scene {
     jumpLabel.setOrigin(0.5, 0.5);
     jumpLabel.setScrollFactor(0);
     jumpLabel.setDepth(1001);
+    this.jumpButtonLabel = jumpLabel;
     this.mobileControlElements.push(this.joystickBase, this.joystickThumb, this.jumpButton, jumpLabel);
 
     this.sprintButton = this.add.circle(sprintX, sprintY, sprintRadius, 0x0f766e, 0.55);
@@ -1101,6 +1693,7 @@ class GameScene extends Phaser.Scene {
     sprintLabel.setOrigin(0.5, 0.5);
     sprintLabel.setScrollFactor(0);
     sprintLabel.setDepth(1001);
+    this.sprintButtonLabel = sprintLabel;
     this.mobileControlElements.push(this.sprintButton, sprintLabel);
 
     this.jumpButton.on('pointerdown', () => {
@@ -1214,6 +1807,8 @@ class GameScene extends Phaser.Scene {
     this.joystickThumb = null;
     this.jumpButton = null;
     this.sprintButton = null;
+    this.jumpButtonLabel = null;
+    this.sprintButtonLabel = null;
     this.mobileJumpRequested = false;
     this.mobileSprintHeld = false;
     this.lastMobileControlLayout.width = 0;
@@ -1260,15 +1855,74 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  updateMoveVectorFromInput() {
+    this.moveVector.set(0, 0);
+
+    if (this.joystickPointer && this.joystickPointer.isDown) {
+      this.updateJoystick(this.joystickPointer);
+    } else if (this.joystickPointer && !this.joystickPointer.isDown) {
+      this.resetJoystick();
+    }
+
+    if (this.keys.A.isDown || this.cursors.left.isDown) {
+      this.moveVector.x = -1;
+    }
+    if (this.keys.D.isDown || this.cursors.right.isDown) {
+      this.moveVector.x = 1;
+    }
+
+    if (this.keys.W.isDown || this.cursors.up.isDown) {
+      this.moveVector.y = -1;
+    }
+    if (this.keys.S.isDown || this.cursors.down.isDown) {
+      this.moveVector.y = 1;
+    }
+
+    if (this.moveVector.lengthSq() > 0) {
+      this.moveVector.normalize();
+    }
+
+    if (this.joystickVector.lengthSq() > 0) {
+      this.moveVector.copy(this.joystickVector);
+    }
+  }
+
   update(time, delta) {
     const localPlayer = this.getLocalPlayer();
     if (!localPlayer) {
+      this.interpolateCars(delta);
+      this.syncPlayersToCars();
+      this.updateTireTracks(time);
       this.interpolateRemotePlayers(delta);
       this.updateAllPlayerDecorations();
+      this.updateControlModeUi();
       return;
     }
 
-    if ((Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.mobileJumpRequested) && !this.isJumping) {
+    this.updateMoveVectorFromInput();
+    this.interpolateCars(delta);
+    this.syncPlayersToCars();
+
+    const jumpPressed = Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.mobileJumpRequested;
+
+    if (localPlayer.carId) {
+      if (jumpPressed) {
+        this.pendingCarExitRequest = true;
+      }
+
+      this.mobileJumpRequested = false;
+      localPlayer.sprite.setVelocity(0, 0);
+
+      this.interpolateRemotePlayers(delta);
+      this.syncPlayersToCars();
+      this.updateTireTracks(time);
+      this.updateAllPlayerDecorations();
+      this.updateControlModeUi();
+      this.sendNetworkInput(time, 'sit', this.pendingCarExitRequest);
+      return;
+    }
+
+    if (jumpPressed && !this.isJumping) {
       const didPushFromEdge = this.applyJumpEdgePushback(localPlayer);
       if (didPushFromEdge) {
         this.updateAllPlayerDecorations();
@@ -1338,6 +1992,8 @@ class GameScene extends Phaser.Scene {
     if (this.isJumping) {
       this.updateAllPlayerDecorations();
       this.interpolateRemotePlayers(delta);
+      this.updateTireTracks(time);
+      this.updateControlModeUi();
       return;
     }
 
@@ -1353,36 +2009,6 @@ class GameScene extends Phaser.Scene {
       this.showEmote('🐾');
     } else if (Phaser.Input.Keyboard.JustDown(this.emoteKeys.six)) {
       this.showEmote('❗');
-    }
-
-    this.moveVector.set(0, 0);
-
-    if (this.joystickPointer && this.joystickPointer.isDown) {
-      this.updateJoystick(this.joystickPointer);
-    } else if (this.joystickPointer && !this.joystickPointer.isDown) {
-      this.resetJoystick();
-    }
-
-    if (this.keys.A.isDown || this.cursors.left.isDown) {
-      this.moveVector.x = -1;
-    }
-    if (this.keys.D.isDown || this.cursors.right.isDown) {
-      this.moveVector.x = 1;
-    }
-
-    if (this.keys.W.isDown || this.cursors.up.isDown) {
-      this.moveVector.y = -1;
-    }
-    if (this.keys.S.isDown || this.cursors.down.isDown) {
-      this.moveVector.y = 1;
-    }
-
-    if (this.moveVector.lengthSq() > 0) {
-      this.moveVector.normalize();
-    }
-
-    if (this.joystickVector.lengthSq() > 0) {
-      this.moveVector.copy(this.joystickVector);
     }
 
     localPlayer.sprite.setVelocity(0, 0);
@@ -1424,7 +2050,10 @@ class GameScene extends Phaser.Scene {
 
     this.ensureLocalPlayerOnWalkableGround(localPlayer);
     this.interpolateRemotePlayers(delta);
+    this.syncPlayersToCars();
+    this.updateTireTracks(time);
     this.updateAllPlayerDecorations();
+    this.updateControlModeUi();
 
     this.sendNetworkInput(time, isMoving ? (isSprinting ? 'run' : 'walk') : 'stand');
   }
@@ -1433,7 +2062,7 @@ class GameScene extends Phaser.Scene {
     const smoothing = Phaser.Math.Clamp((delta / 1000) * 12, 0, 1);
 
     Object.values(this.players).forEach((playerEntity) => {
-      if (playerEntity.isLocal) {
+      if (playerEntity.isLocal || playerEntity.carId) {
         return;
       }
 
@@ -1458,16 +2087,24 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
+    const isDriving = Boolean(localPlayer.carId);
+    const exitCar = this.pendingCarExitRequest;
+
     this.network.sendInput({
       moveX: this.moveVector.x,
       moveY: this.moveVector.y,
       jump: this.isJumping,
-      animation: animationState,
+      animation: isDriving ? 'sit' : animationState,
       x: localPlayer.sprite.x,
       y: localPlayer.sprite.y,
-      flipX: localPlayer.sprite.flipX
+      flipX: isDriving ? false : localPlayer.sprite.flipX,
+      carThrottle: isDriving ? Phaser.Math.Clamp(-this.moveVector.y, -1, 1) : 0,
+      carSteer: isDriving ? Phaser.Math.Clamp(this.moveVector.x, -1, 1) : 0,
+      carBoost: isDriving ? this.getIsSprinting() : false,
+      exitCar
     });
 
+    this.pendingCarExitRequest = false;
     this.lastInputSentAt = time;
   }
 
@@ -1539,11 +2176,22 @@ class GameScene extends Phaser.Scene {
   }
 
   updatePlayerDecorations(playerEntity) {
-    playerEntity.playerNameText.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - 100);
-    playerEntity.dogTypeText.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - 75);
+    const isSeated = Boolean(playerEntity.carId);
+    const nameOffset = isSeated ? 118 : 100;
+    const typeOffset = isSeated ? 94 : 75;
+
+    if (!isSeated) {
+      playerEntity.sprite.setDepth(playerEntity.sprite.y + 20);
+    }
+
+    playerEntity.playerNameText.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - nameOffset);
+    playerEntity.dogTypeText.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - typeOffset);
+    playerEntity.playerNameText.setDepth(playerEntity.sprite.depth + 20);
+    playerEntity.dogTypeText.setDepth(playerEntity.sprite.depth + 21);
 
     if (playerEntity.currentEmote && playerEntity.currentEmote.active && playerEntity.currentEmote.alpha === 1) {
-      playerEntity.currentEmote.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - 140);
+      playerEntity.currentEmote.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - (isSeated ? 154 : 140));
+      playerEntity.currentEmote.setDepth(playerEntity.sprite.depth + 30);
     }
   }
 
@@ -1561,10 +2209,27 @@ class GameScene extends Phaser.Scene {
       this.removePlayer(playerId);
     });
 
+    Object.keys(this.cars).forEach((carId) => {
+      this.removeCar(carId);
+    });
+
     this.players = {};
+    this.cars = {};
     this.clearEmoteButtons();
     this.clearMobileControls();
     this.extraPointersAdded = false;
+    this.pendingCarExitRequest = false;
+    this.tireTrackSegments = [];
+
+    if (this.tireTrackGraphics) {
+      this.tireTrackGraphics.destroy();
+      this.tireTrackGraphics = null;
+    }
+
+    if (this.carExitHintText) {
+      this.carExitHintText.destroy();
+      this.carExitHintText = null;
+    }
 
     if (this.jumpTween) {
       this.jumpTween.stop();
