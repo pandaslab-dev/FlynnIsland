@@ -6,17 +6,44 @@ const cors = require('cors');
 const { PNG } = require('pngjs');
 const { Server } = require('socket.io');
 
+const worldConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'IslandWorldConfig.js'));
+
 const PORT = Number(process.env.PORT) || 3000;
 const TICK_RATE_MS = 50;
-const TICK_SECONDS = TICK_RATE_MS / 1000;
 
-const SPAWN_X = 1024;
-const SPAWN_Y = 1024;
-const WORLD_WIDTH = 2048;
-const WORLD_HEIGHT = 2048;
-const ISLAND_MASK_PATH = path.resolve(__dirname, '..', 'misc_assets', 'islandedge.png');
-const TOP_GOAL_MASK_PATH = path.resolve(__dirname, '..', 'misc_assets', 'goal_lefttop.png');
-const BOTTOM_GOAL_MASK_PATH = path.resolve(__dirname, '..', 'misc_assets', 'goal_rightbottom.png');
+const WORLD_BOUNDS = worldConfig.worldBounds || {
+  x: 0,
+  y: 0,
+  width: 4096,
+  height: 4096
+};
+const SPAWN_POINT = worldConfig.spawn || {
+  x: WORLD_BOUNDS.width / 2,
+  y: WORLD_BOUNDS.height / 2
+};
+const COLLISION_MASK_CONFIG = worldConfig.collisionMask || {
+  imagePath: 'misc_assets/island-4096-edge.png',
+  offsetX: 0,
+  offsetY: 0,
+  blockedColorThreshold: 12
+};
+
+const WORLD_WIDTH = WORLD_BOUNDS.width;
+const WORLD_HEIGHT = WORLD_BOUNDS.height;
+const SPAWN_X = SPAWN_POINT.x;
+const SPAWN_Y = SPAWN_POINT.y;
+const PLAYER_COLLISION_RADIUS = 18;
+const PLAYER_COLLISION_OFFSET_Y = 72;
+const PLAYER_TORSO_COLLISION_RADIUS = 22;
+const PLAYER_TORSO_COLLISION_OFFSET_Y = 38;
+const COLLISION_SWEEP_STEP = 4;
+const MAX_PLAYER_SPEED = 480;
+const MASK_OFFSET_X = Number.isFinite(COLLISION_MASK_CONFIG.offsetX) ? COLLISION_MASK_CONFIG.offsetX : 0;
+const MASK_OFFSET_Y = Number.isFinite(COLLISION_MASK_CONFIG.offsetY) ? COLLISION_MASK_CONFIG.offsetY : 0;
+const BLOCKED_COLOR_THRESHOLD = Number.isFinite(COLLISION_MASK_CONFIG.blockedColorThreshold)
+  ? COLLISION_MASK_CONFIG.blockedColorThreshold
+  : 12;
+const ISLAND_MASK_PATH = path.resolve(__dirname, '..', COLLISION_MASK_CONFIG.imagePath);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const INDEX_HTML_PATH = path.join(ROOT_DIR, 'index.html');
 const INDEX_BUILD_TOKEN = '__BUILD_ID__';
@@ -28,55 +55,12 @@ const BUILD_ID = (
 ).trim();
 
 const ALLOWED_DOG_TYPES = new Set(['Alice', 'Remix', 'Sapphire', 'Wendy']);
+const ALLOWED_ANIMATIONS = new Set(['stand', 'walk', 'run', 'jump']);
 
 const players = {};
 
-const BALL_RADIUS = 46;
-const PLAYER_COLLISION_RADIUS = 52;
-const BALL_MAX_SPEED = 950;
-const BALL_BOUNCE_DAMPING = 0.82;
-const BALL_FRICTION = 0.989;
-const BALL_SPAWN_X = 1024;
-const BALL_SPAWN_Y = 820;
-const WINNING_SCORE = 10;
-const GOAL_EVENT_COOLDOWN_TICKS = 2;
-const GOAL_OPAQUE_ALPHA_THRESHOLD = 16;
-const GOAL_OVERLAP_SCORE_THRESHOLD = 0.5;
-const GOAL_OVERLAP_SAMPLE_STEP = 6;
-
-const TOP_GOAL_CONFIG = {
-  x: 831.79,
-  y: 227.42,
-  scale: 0.72,
-  maskPath: TOP_GOAL_MASK_PATH
-};
-
-const BOTTOM_GOAL_CONFIG = {
-  x: 1347.2,
-  y: 875.89,
-  scale: 0.72,
-  maskPath: BOTTOM_GOAL_MASK_PATH
-};
-
 let islandMask = null;
-let goalMasks = {
-  top: null,
-  bottom: null
-};
-let goalCooldownTicksRemaining = 0;
-
-const ball = {
-  x: BALL_SPAWN_X,
-  y: BALL_SPAWN_Y,
-  vx: 0,
-  vy: 0,
-  radius: BALL_RADIUS
-};
-
-const scores = {
-  left: 0,
-  right: 0
-};
+let hasWarnedMissingIslandMask = false;
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -90,6 +74,11 @@ app.use(express.static(ROOT_DIR, {
 
     if (relativePath === 'index.html' || relativePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return;
+    }
+
+    if (relativePath === 'misc_assets/island-4096.png' || relativePath === 'misc_assets/island-4096-edge.png') {
+      res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
       return;
     }
 
@@ -155,6 +144,14 @@ function sanitizeDogType(dogType) {
   return 'Remix';
 }
 
+function sanitizeAnimation(animation) {
+  if (typeof animation !== 'string') {
+    return 'stand';
+  }
+
+  return ALLOWED_ANIMATIONS.has(animation) ? animation : 'stand';
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -183,39 +180,24 @@ function loadIslandMask() {
       height: png.height,
       data: png.data
     };
+    hasWarnedMissingIslandMask = false;
   } catch (error) {
     islandMask = null;
-    console.warn(`Island mask load failed at ${ISLAND_MASK_PATH}; using world bounds fallback.`);
+    console.warn(`Island mask load failed at ${ISLAND_MASK_PATH}; movement will be blocked until mask loads.`);
   }
-}
-
-function loadGoalMask(maskPath) {
-  try {
-    const maskBuffer = fs.readFileSync(maskPath);
-    const png = PNG.sync.read(maskBuffer);
-    return {
-      width: png.width,
-      height: png.height,
-      data: png.data
-    };
-  } catch (error) {
-    console.warn(`Goal mask load failed at ${maskPath}; goal scoring for that goal will be disabled.`);
-    return null;
-  }
-}
-
-function loadGoalMasks() {
-  goalMasks.top = loadGoalMask(TOP_GOAL_CONFIG.maskPath);
-  goalMasks.bottom = loadGoalMask(BOTTOM_GOAL_CONFIG.maskPath);
 }
 
 function isBlockedAtWorldPoint(worldX, worldY) {
   if (!islandMask) {
-    return worldX < 0 || worldY < 0 || worldX >= WORLD_WIDTH || worldY >= WORLD_HEIGHT;
+    if (!hasWarnedMissingIslandMask) {
+      console.warn('Island collision mask is unavailable on server; movement is blocked until mask loads.');
+      hasWarnedMissingIslandMask = true;
+    }
+    return true;
   }
 
-  const pixelX = Math.floor(worldX);
-  const pixelY = Math.floor(worldY);
+  const pixelX = Math.floor(worldX + MASK_OFFSET_X);
+  const pixelY = Math.floor(worldY + MASK_OFFSET_Y);
 
   if (
     pixelX < 0 ||
@@ -236,21 +218,13 @@ function isBlockedAtWorldPoint(worldX, worldY) {
     return false;
   }
 
-  return r < 12 && g < 12 && b < 12;
+  return r < BLOCKED_COLOR_THRESHOLD && g < BLOCKED_COLOR_THRESHOLD && b < BLOCKED_COLOR_THRESHOLD;
 }
 
-function canBallOccupy(worldX, worldY) {
-  const sampleRadius = BALL_RADIUS - 4;
+function canPlayerOccupy(worldX, worldY) {
   const points = [
-    { x: worldX, y: worldY },
-    { x: worldX + sampleRadius, y: worldY },
-    { x: worldX - sampleRadius, y: worldY },
-    { x: worldX, y: worldY + sampleRadius },
-    { x: worldX, y: worldY - sampleRadius },
-    { x: worldX + (sampleRadius * 0.7), y: worldY + (sampleRadius * 0.7) },
-    { x: worldX - (sampleRadius * 0.7), y: worldY + (sampleRadius * 0.7) },
-    { x: worldX + (sampleRadius * 0.7), y: worldY - (sampleRadius * 0.7) },
-    { x: worldX - (sampleRadius * 0.7), y: worldY - (sampleRadius * 0.7) }
+    ...buildCollisionProbeRing(worldX, worldY + PLAYER_COLLISION_OFFSET_Y, PLAYER_COLLISION_RADIUS),
+    ...buildCollisionProbeRing(worldX, worldY + PLAYER_TORSO_COLLISION_OFFSET_Y, PLAYER_TORSO_COLLISION_RADIUS)
   ];
 
   for (const point of points) {
@@ -262,221 +236,110 @@ function canBallOccupy(worldX, worldY) {
   return true;
 }
 
-function pushBallToNearestOpenSpace() {
-  if (canBallOccupy(ball.x, ball.y)) {
-    return true;
-  }
+function buildCollisionProbeRing(originX, originY, radius) {
+  const diagonalRadius = radius * 0.78;
+  const innerRadius = radius * 0.5;
 
-  const originX = ball.x;
-  const originY = ball.y;
-  const angleStep = (Math.PI * 2) / 16;
-
-  for (let radius = 4; radius <= 120; radius += 4) {
-    for (let i = 0; i < 16; i += 1) {
-      const angle = i * angleStep;
-      const candidateX = originX + (Math.cos(angle) * radius);
-      const candidateY = originY + (Math.sin(angle) * radius);
-
-      if (canBallOccupy(candidateX, candidateY)) {
-        ball.x = candidateX;
-        ball.y = candidateY;
-        return true;
-      }
-    }
-  }
-
-  return false;
+  return [
+    { x: originX, y: originY },
+    { x: originX + radius, y: originY },
+    { x: originX - radius, y: originY },
+    { x: originX, y: originY + radius },
+    { x: originX, y: originY - radius },
+    { x: originX + diagonalRadius, y: originY + diagonalRadius },
+    { x: originX - diagonalRadius, y: originY + diagonalRadius },
+    { x: originX + diagonalRadius, y: originY - diagonalRadius },
+    { x: originX - diagonalRadius, y: originY - diagonalRadius },
+    { x: originX + innerRadius, y: originY },
+    { x: originX - innerRadius, y: originY },
+    { x: originX, y: originY + innerRadius },
+    { x: originX, y: originY - innerRadius }
+  ];
 }
 
-function simulateBall(dt) {
-  const targetX = ball.x + (ball.vx * dt);
-  const targetY = ball.y + (ball.vy * dt);
+function sweepToWalkablePosition(startX, startY, targetX, targetY, stepSize = COLLISION_SWEEP_STEP) {
+  const deltaX = targetX - startX;
+  const deltaY = targetY - startY;
+  const distance = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
+  const steps = Math.max(1, Math.ceil(distance / Math.max(stepSize, 1)));
 
-  if (canBallOccupy(targetX, ball.y)) {
-    ball.x = targetX;
-  } else {
-    ball.vx = -ball.vx * BALL_BOUNCE_DAMPING;
-  }
+  let lastWalkableX = startX;
+  let lastWalkableY = startY;
 
-  if (canBallOccupy(ball.x, targetY)) {
-    ball.y = targetY;
-  } else {
-    ball.vy = -ball.vy * BALL_BOUNCE_DAMPING;
-  }
+  for (let step = 1; step <= steps; step += 1) {
+    const t = step / steps;
+    const sampleX = startX + (deltaX * t);
+    const sampleY = startY + (deltaY * t);
 
-  Object.values(players).forEach((player) => {
-    const dx = ball.x - player.x;
-    const dy = ball.y - player.y;
-    const distanceSq = (dx * dx) + (dy * dy);
-    const minDistance = BALL_RADIUS + PLAYER_COLLISION_RADIUS;
-    const minDistanceSq = minDistance * minDistance;
-
-    if (distanceSq >= minDistanceSq) {
-      return;
+    if (!canPlayerOccupy(sampleX, sampleY)) {
+      break;
     }
 
-    const distance = Math.sqrt(distanceSq) || 0.0001;
-    const normalX = dx / distance;
-    const normalY = dy / distance;
-    const overlap = minDistance - distance;
-
-    ball.x += normalX * overlap;
-    ball.y += normalY * overlap;
-
-    const playerVx = Number.isFinite(player.vx) ? player.vx : 0;
-    const playerVy = Number.isFinite(player.vy) ? player.vy : 0;
-    const playerPushAlongNormal = (playerVx * normalX) + (playerVy * normalY);
-    const movementImpulse = Math.max(0, playerPushAlongNormal) * 0.95;
-    const separationImpulse = overlap * 34;
-    const totalImpulse = movementImpulse + separationImpulse;
-
-    ball.vx += normalX * totalImpulse;
-    ball.vy += normalY * totalImpulse;
-
-    const clamped = clampVectorMagnitude(ball.vx, ball.vy, BALL_MAX_SPEED);
-    ball.vx = clamped.vx;
-    ball.vy = clamped.vy;
-  });
-
-  if (!canBallOccupy(ball.x, ball.y)) {
-    const escaped = pushBallToNearestOpenSpace();
-    if (!escaped) {
-      ball.x = clamp(ball.x, BALL_RADIUS, WORLD_WIDTH - BALL_RADIUS);
-      ball.y = clamp(ball.y, BALL_RADIUS, WORLD_HEIGHT - BALL_RADIUS);
-    }
-    ball.vx = -ball.vx * BALL_BOUNCE_DAMPING;
-    ball.vy = -ball.vy * BALL_BOUNCE_DAMPING;
+    lastWalkableX = sampleX;
+    lastWalkableY = sampleY;
   }
-
-  ball.vx *= BALL_FRICTION;
-  ball.vy *= BALL_FRICTION;
-
-  if (Math.abs(ball.vx) < 1.2) {
-    ball.vx = 0;
-  }
-  if (Math.abs(ball.vy) < 1.2) {
-    ball.vy = 0;
-  }
-}
-
-function resetBallToCenter() {
-  ball.x = BALL_SPAWN_X;
-  ball.y = BALL_SPAWN_Y;
-  ball.vx = 0;
-  ball.vy = 0;
-}
-
-function getGoalWorldBounds(goalConfig, goalMask) {
-  const halfWidth = (goalMask.width * goalConfig.scale) / 2;
-  const halfHeight = (goalMask.height * goalConfig.scale) / 2;
 
   return {
-    left: goalConfig.x - halfWidth,
-    right: goalConfig.x + halfWidth,
-    top: goalConfig.y - halfHeight,
-    bottom: goalConfig.y + halfHeight
+    x: lastWalkableX,
+    y: lastWalkableY
   };
 }
 
-function isOpaqueGoalPixelAtWorldPoint(goalConfig, goalMask, worldX, worldY) {
-  if (!goalMask) {
-    return false;
+function findNearestWalkablePosition(startX, startY, maxRadius = 220, radiusStep = 8) {
+  if (canPlayerOccupy(startX, startY)) {
+    return { x: startX, y: startY };
   }
 
-  const localX = ((worldX - goalConfig.x) / goalConfig.scale) + (goalMask.width / 2);
-  const localY = ((worldY - goalConfig.y) / goalConfig.scale) + (goalMask.height / 2);
-  const pixelX = Math.floor(localX);
-  const pixelY = Math.floor(localY);
+  const angleStep = Math.PI / 8;
+  for (let radius = radiusStep; radius <= maxRadius; radius += radiusStep) {
+    for (let angle = 0; angle < (Math.PI * 2); angle += angleStep) {
+      const candidateX = startX + (Math.cos(angle) * radius);
+      const candidateY = startY + (Math.sin(angle) * radius);
 
-  if (
-    pixelX < 0 ||
-    pixelY < 0 ||
-    pixelX >= goalMask.width ||
-    pixelY >= goalMask.height
-  ) {
-    return false;
-  }
-
-  const pixelIndex = ((pixelY * goalMask.width) + pixelX) * 4;
-  const alpha = goalMask.data[pixelIndex + 3];
-  return alpha >= GOAL_OPAQUE_ALPHA_THRESHOLD;
-}
-
-function getBallOverlapRatioWithGoal(goalConfig, goalMask) {
-  if (!goalMask) {
-    return 0;
-  }
-
-  const bounds = getGoalWorldBounds(goalConfig, goalMask);
-  if (
-    (ball.x + ball.radius) < bounds.left ||
-    (ball.x - ball.radius) > bounds.right ||
-    (ball.y + ball.radius) < bounds.top ||
-    (ball.y - ball.radius) > bounds.bottom
-  ) {
-    return 0;
-  }
-
-  const step = GOAL_OVERLAP_SAMPLE_STEP;
-  const radius = ball.radius;
-  const radiusSq = radius * radius;
-  let sampleCount = 0;
-  let overlapCount = 0;
-
-  for (let y = -radius; y <= radius; y += step) {
-    for (let x = -radius; x <= radius; x += step) {
-      if ((x * x) + (y * y) > radiusSq) {
-        continue;
-      }
-
-      sampleCount += 1;
-      if (isOpaqueGoalPixelAtWorldPoint(goalConfig, goalMask, ball.x + x, ball.y + y)) {
-        overlapCount += 1;
+      if (canPlayerOccupy(candidateX, candidateY)) {
+        return { x: candidateX, y: candidateY };
       }
     }
   }
 
-  if (sampleCount === 0) {
-    return 0;
-  }
-
-  return overlapCount / sampleCount;
+  return null;
 }
 
-function handleGoalScoring() {
-  if (goalCooldownTicksRemaining > 0) {
-    goalCooldownTicksRemaining -= 1;
-    return false;
+function resolveSpawnPoint() {
+  const clampedX = clamp(SPAWN_X, WORLD_BOUNDS.x, (WORLD_BOUNDS.x + WORLD_WIDTH) - 1);
+  const clampedY = clamp(SPAWN_Y, WORLD_BOUNDS.y, (WORLD_BOUNDS.y + WORLD_HEIGHT) - 1);
+
+  return findNearestWalkablePosition(clampedX, clampedY) || {
+    x: clampedX,
+    y: clampedY
+  };
+}
+
+function resolvePlayerPosition(currentX, currentY, requestedX, requestedY) {
+  const clampedX = clamp(requestedX, WORLD_BOUNDS.x, (WORLD_BOUNDS.x + WORLD_WIDTH) - 1);
+  const clampedY = clamp(requestedY, WORLD_BOUNDS.y, (WORLD_BOUNDS.y + WORLD_HEIGHT) - 1);
+
+  const resolvedX = sweepToWalkablePosition(currentX, currentY, clampedX, currentY);
+  const resolvedY = sweepToWalkablePosition(resolvedX.x, currentY, resolvedX.x, clampedY);
+  const nextX = resolvedY.x;
+  const nextY = resolvedY.y;
+
+  if (canPlayerOccupy(nextX, nextY)) {
+    return {
+      x: nextX,
+      y: nextY
+    };
   }
 
-  const topGoalOverlap = getBallOverlapRatioWithGoal(TOP_GOAL_CONFIG, goalMasks.top);
-  const bottomGoalOverlap = getBallOverlapRatioWithGoal(BOTTOM_GOAL_CONFIG, goalMasks.bottom);
-  const topGoalHit = topGoalOverlap >= GOAL_OVERLAP_SCORE_THRESHOLD;
-  const bottomGoalHit = bottomGoalOverlap >= GOAL_OVERLAP_SCORE_THRESHOLD;
-
-  if (!topGoalHit && !bottomGoalHit) {
-    return false;
+  const nearest = findNearestWalkablePosition(nextX, nextY, 96, 4);
+  if (nearest) {
+    return nearest;
   }
 
-  if (topGoalHit && !bottomGoalHit) {
-    scores.right += 1;
-  } else if (bottomGoalHit && !topGoalHit) {
-    scores.left += 1;
-  } else if (topGoalOverlap >= bottomGoalOverlap) {
-    // Edge case: overlaps both goals in the same tick, prefer deeper penetration.
-    scores.right += 1;
-  } else {
-    scores.left += 1;
-  }
-
-  if (scores.left >= WINNING_SCORE || scores.right >= WINNING_SCORE) {
-    scores.left = 0;
-    scores.right = 0;
-  }
-
-  resetBallToCenter();
-  goalCooldownTicksRemaining = GOAL_EVENT_COOLDOWN_TICKS;
-  return true;
+  return {
+    x: currentX,
+    y: currentY
+  };
 }
 
 function serializePlayer(player) {
@@ -495,29 +358,20 @@ function serializePlayer(player) {
 function emitWorldState() {
   const playerSnapshot = Object.values(players).map((player) => serializePlayer(player));
   io.emit('world:state', {
-    players: playerSnapshot,
-    ball: {
-      x: ball.x,
-      y: ball.y,
-      vx: ball.vx,
-      vy: ball.vy,
-      radius: ball.radius
-    },
-    scores: {
-      left: scores.left,
-      right: scores.right
-    }
+    players: playerSnapshot
   });
 }
 
 io.on('connection', (socket) => {
   socket.on('player:join', (payload = {}) => {
+    const spawnPoint = resolveSpawnPoint();
+
     players[socket.id] = {
       id: socket.id,
       name: sanitizeName(payload.name),
       dogType: sanitizeDogType(payload.dogType),
-      x: SPAWN_X,
-      y: SPAWN_Y,
+      x: spawnPoint.x,
+      y: spawnPoint.y,
       animation: 'stand',
       flipX: false,
       vx: 0,
@@ -534,28 +388,22 @@ io.on('connection', (socket) => {
 
     const now = Date.now();
     const elapsedSeconds = clamp((now - (player.lastInputAt || now)) / 1000, 0.016, 0.2);
+    const requestedX = Number.isFinite(payload.x) ? payload.x : player.x;
+    const requestedY = Number.isFinite(payload.y) ? payload.y : player.y;
+    const resolvedPosition = resolvePlayerPosition(player.x, player.y, requestedX, requestedY);
 
-    const nextX = Number.isFinite(payload.x) ? payload.x : player.x;
-    const nextY = Number.isFinite(payload.y) ? payload.y : player.y;
+    const rawVx = (resolvedPosition.x - player.x) / elapsedSeconds;
+    const rawVy = (resolvedPosition.y - player.y) / elapsedSeconds;
+    const clampedVelocity = clampVectorMagnitude(rawVx, rawVy, MAX_PLAYER_SPEED);
 
-    const rawVx = (nextX - player.x) / elapsedSeconds;
-    const rawVy = (nextY - player.y) / elapsedSeconds;
-    const clampedVelocity = clampVectorMagnitude(rawVx, rawVy, 480);
-
-    if (Number.isFinite(payload.x)) {
-      player.x = nextX;
-    }
-    if (Number.isFinite(payload.y)) {
-      player.y = nextY;
-    }
-
+    player.x = resolvedPosition.x;
+    player.y = resolvedPosition.y;
     player.vx = clampedVelocity.vx;
     player.vy = clampedVelocity.vy;
     player.lastInputAt = now;
 
-    if (typeof payload.animation === 'string') {
-      player.animation = payload.animation;
-    }
+    player.animation = sanitizeAnimation(payload.animation);
+
     if (typeof payload.flipX === 'boolean') {
       player.flipX = payload.flipX;
     }
@@ -578,9 +426,6 @@ io.on('connection', (socket) => {
 });
 
 setInterval(() => {
-  simulateBall(TICK_SECONDS);
-  handleGoalScoring();
-
   emitWorldState();
 
   Object.values(players).forEach((player) => {
@@ -591,7 +436,14 @@ setInterval(() => {
 }, TICK_RATE_MS);
 
 loadIslandMask();
-loadGoalMasks();
+fs.watchFile(ISLAND_MASK_PATH, { interval: 1000 }, (current, previous) => {
+  if (current.mtimeMs === previous.mtimeMs) {
+    return;
+  }
+
+  loadIslandMask();
+  console.log('Reloaded island collision mask.');
+});
 
 server.listen(PORT, () => {
   console.log(`Flynn Island multiplayer server running on port ${PORT}`);

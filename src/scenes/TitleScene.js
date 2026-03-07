@@ -6,10 +6,14 @@
 
 class TitleScene extends Phaser.Scene {
   constructor() {
-    super({ key: 'TitleScene' });  // Scene identifier
+    super({ key: 'TitleScene' });
     this.logo = null;
     this.playButton = null;
     this.muteButton = null;
+    this.volumeLabel = null;
+    this.volumeTrack = null;
+    this.volumeFill = null;
+    this.volumeHandle = null;
     this.playButtonScales = {
       base: 0.3,
       hover: 0.35,
@@ -17,31 +21,23 @@ class TitleScene extends Phaser.Scene {
     };
     this.resizeHandler = null;
   }
-  
+
   preload() {
-    // Load title screen assets
     this.load.image('logo', 'misc_assets/logo.png');
     this.load.image('playnow', 'misc_assets/playnow.png');
     this.load.audio('background_music', 'misc_assets/music.mp3');
   }
-  
+
   create() {
-    // Add sky blue background
     this.cameras.main.setBackgroundColor('#87CEEB');
 
     this.initializeAudioState();
     this.ensureBackgroundMusic();
-    
-    // Add logo at top center
+
     this.logo = this.add.image(0, 0, 'logo');
-    
-    // Add "Play Now" button
     this.playButton = this.add.image(0, 0, 'playnow');
-    
-    // Make button interactive
     this.playButton.setInteractive({ useHandCursor: true });
-    
-    // Hover effect - scale up slightly
+
     this.playButton.on('pointerover', () => {
       this.tweens.add({
         targets: this.playButton,
@@ -51,8 +47,7 @@ class TitleScene extends Phaser.Scene {
         ease: 'Power2'
       });
     });
-    
-    // Hover out - scale back to normal
+
     this.playButton.on('pointerout', () => {
       this.tweens.add({
         targets: this.playButton,
@@ -62,12 +57,10 @@ class TitleScene extends Phaser.Scene {
         ease: 'Power2'
       });
     });
-    
-    // Click handler - transition to game
+
     this.playButton.on('pointerdown', () => {
       this.ensureBackgroundMusic();
 
-      // Visual feedback - quick scale down
       this.tweens.add({
         targets: this.playButton,
         scaleX: this.playButtonScales.pressed,
@@ -81,7 +74,9 @@ class TitleScene extends Phaser.Scene {
     });
 
     this.createMuteButton();
+    this.createVolumeControls();
     this.layoutScene();
+
     this.resizeHandler = () => this.layoutScene();
     this.scale.on('resize', this.resizeHandler);
 
@@ -101,8 +96,38 @@ class TitleScene extends Phaser.Scene {
     };
   }
 
+  getMusicVolume() {
+    const storedVolume = Number(window.flynnMusicVolume);
+    if (!Number.isFinite(storedVolume)) {
+      return 0.5;
+    }
+
+    return Phaser.Math.Clamp(storedVolume, 0, 1);
+  }
+
+  setMusicMuted(isMuted) {
+    window.flynnMusicMuted = Boolean(isMuted);
+    this.applyAudioState();
+    this.refreshMuteButtonLabel();
+  }
+
+  setMusicVolume(nextVolume) {
+    window.flynnMusicVolume = Phaser.Math.Clamp(nextVolume, 0, 1);
+    this.applyAudioState();
+    this.refreshVolumeControls();
+  }
+
+  applyAudioState() {
+    this.sound.mute = Boolean(window.flynnMusicMuted);
+
+    const music = this.sound.get('background_music');
+    if (music) {
+      music.setVolume(this.getMusicVolume());
+    }
+  }
+
   layoutScene() {
-    if (!this.logo || !this.playButton) {
+    if (!this.logo || !this.playButton || !this.volumeLabel || !this.volumeTrack || !this.volumeHandle) {
       return;
     }
 
@@ -146,14 +171,24 @@ class TitleScene extends Phaser.Scene {
         : (isPhone ? 88 : 120)
     );
 
+    const sliderWidth = Phaser.Math.Clamp(this.scale.width * (flags.isPortrait ? 0.52 : 0.3), 190, 320);
+    const sliderHeight = isPhone ? 10 : 12;
+    let volumeLabelY = buttonY + (this.playButton.displayHeight / 2) + (flags.isPortrait ? 40 : 34);
+    let volumeTrackY = volumeLabelY + 28;
+
     this.logo.setScale(logoScale);
     this.logo.setPosition(centerX, logoY);
 
     this.playButton.setScale(this.playButtonScales.base);
     this.playButton.setPosition(centerX, buttonY);
 
+    this.volumeLabel.setPosition(centerX, volumeLabelY);
+    this.volumeTrack.setPosition(centerX, volumeTrackY);
+    this.volumeTrack.setDisplaySize(sliderWidth, sliderHeight);
+    this.refreshVolumeControls();
+
     const topEdge = this.logo.y - (this.logo.displayHeight / 2);
-    const bottomEdge = this.playButton.y + (this.playButton.displayHeight / 2);
+    const bottomEdge = this.volumeHandle.y + (this.volumeHandle.displayHeight / 2);
     const usableTop = margin;
     const usableBottom = this.scale.height - margin;
     let shiftY = 0;
@@ -168,14 +203,21 @@ class TitleScene extends Phaser.Scene {
     if (shiftY !== 0) {
       logoY += shiftY;
       buttonY += shiftY;
+      volumeLabelY += shiftY;
+      volumeTrackY += shiftY;
+
       this.logo.setPosition(centerX, logoY);
       this.playButton.setPosition(centerX, buttonY);
+      this.volumeLabel.setPosition(centerX, volumeLabelY);
+      this.volumeTrack.setPosition(centerX, volumeTrackY);
     }
 
     if (this.muteButton) {
       const muteMargin = isPhone ? 16 : 18;
       this.muteButton.setPosition(this.scale.width - muteMargin, muteMargin);
     }
+
+    this.refreshVolumeControls();
   }
 
   handleSceneShutdown() {
@@ -186,29 +228,33 @@ class TitleScene extends Phaser.Scene {
   }
 
   ensureBackgroundMusic() {
-    const existingMusic = this.sound.get('background_music');
+    const playMusic = () => {
+      let music = this.sound.get('background_music');
 
+      if (!music) {
+        music = this.sound.add('background_music', {
+          loop: true,
+          volume: this.getMusicVolume()
+        });
+      }
+
+      music.setVolume(this.getMusicVolume());
+
+      if (!music.isPlaying) {
+        music.play({
+          loop: true,
+          volume: this.getMusicVolume()
+        });
+      }
+
+      this.applyAudioState();
+    };
+
+    const existingMusic = this.sound.get('background_music');
     if (existingMusic && existingMusic.isPlaying) {
+      this.applyAudioState();
       return;
     }
-
-    const playMusic = () => {
-      const currentMusic = this.sound.get('background_music');
-      if (currentMusic && currentMusic.isPlaying) {
-        return;
-      }
-
-      if (currentMusic) {
-        currentMusic.play({ loop: true, volume: 0.5 });
-        return;
-      }
-
-      const music = this.sound.add('background_music', {
-        loop: true,
-        volume: 0.5
-      });
-      music.play();
-    };
 
     if (this.sound.locked) {
       this.sound.once(Phaser.Sound.Events.UNLOCKED, playMusic);
@@ -223,10 +269,14 @@ class TitleScene extends Phaser.Scene {
 
   initializeAudioState() {
     if (typeof window.flynnMusicMuted === 'undefined') {
-      window.flynnMusicMuted = true;
+      window.flynnMusicMuted = false;
     }
 
-    this.sound.mute = Boolean(window.flynnMusicMuted);
+    if (!Number.isFinite(Number(window.flynnMusicVolume))) {
+      window.flynnMusicVolume = 0.5;
+    }
+
+    this.applyAudioState();
   }
 
   createMuteButton() {
@@ -241,9 +291,8 @@ class TitleScene extends Phaser.Scene {
     this.muteButton.setInteractive({ useHandCursor: true });
 
     this.muteButton.on('pointerdown', () => {
-      this.sound.mute = !this.sound.mute;
-      window.flynnMusicMuted = this.sound.mute;
-      this.refreshMuteButtonLabel();
+      this.ensureBackgroundMusic();
+      this.setMusicMuted(!this.sound.mute);
     });
 
     this.muteButton.on('pointerover', () => {
@@ -258,9 +307,87 @@ class TitleScene extends Phaser.Scene {
     this.muteButton.setAlpha(0.92);
   }
 
+  createVolumeControls() {
+    this.volumeLabel = this.add.text(0, 0, '', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '20px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4,
+      align: 'center'
+    });
+    this.volumeLabel.setOrigin(0.5, 0.5);
+    this.volumeLabel.setDepth(90);
+
+    this.volumeTrack = this.add.rectangle(0, 0, 240, 12, 0x164e63, 0.72);
+    this.volumeTrack.setStrokeStyle(2, 0xffffff, 0.55);
+    this.volumeTrack.setDepth(90);
+    this.volumeTrack.setInteractive({ useHandCursor: true });
+
+    this.volumeFill = this.add.rectangle(0, 0, 120, 12, 0xfbbf24, 0.96);
+    this.volumeFill.setOrigin(0, 0.5);
+    this.volumeFill.setDepth(91);
+
+    this.volumeHandle = this.add.circle(0, 0, 12, 0xfffbeb, 1);
+    this.volumeHandle.setStrokeStyle(2, 0x164e63, 0.9);
+    this.volumeHandle.setDepth(92);
+    this.volumeHandle.setInteractive({ useHandCursor: true });
+    this.input.setDraggable(this.volumeHandle);
+
+    const updateVolumeFromPointer = (pointer) => {
+      const trackLeft = this.volumeTrack.x - (this.volumeTrack.displayWidth / 2);
+      const nextVolume = Phaser.Math.Clamp(
+        (pointer.x - trackLeft) / Math.max(this.volumeTrack.displayWidth, 1),
+        0,
+        1
+      );
+
+      this.ensureBackgroundMusic();
+      this.setMusicMuted(false);
+      this.setMusicVolume(nextVolume);
+    };
+
+    this.volumeTrack.on('pointerdown', (pointer) => {
+      updateVolumeFromPointer(pointer);
+    });
+
+    this.volumeHandle.on('dragstart', () => {
+      this.volumeHandle.setScale(1.08);
+    });
+
+    this.volumeHandle.on('drag', (pointer) => {
+      updateVolumeFromPointer(pointer);
+    });
+
+    this.volumeHandle.on('dragend', () => {
+      this.volumeHandle.setScale(1);
+    });
+
+    this.refreshVolumeControls();
+  }
+
   refreshMuteButtonLabel() {
+    if (!this.muteButton) {
+      return;
+    }
+
     const isMuted = this.sound.mute;
     this.muteButton.setText(isMuted ? 'Muted' : 'Music On');
     this.muteButton.setBackgroundColor(isMuted ? 'rgba(90, 90, 90, 0.72)' : 'rgba(90, 90, 90, 0.55)');
+  }
+
+  refreshVolumeControls() {
+    if (!this.volumeLabel || !this.volumeTrack || !this.volumeFill || !this.volumeHandle) {
+      return;
+    }
+
+    const musicVolume = this.getMusicVolume();
+    const trackLeft = this.volumeTrack.x - (this.volumeTrack.displayWidth / 2);
+    const handleX = trackLeft + (this.volumeTrack.displayWidth * musicVolume);
+
+    this.volumeLabel.setText(`Volume ${Math.round(musicVolume * 100)}%`);
+    this.volumeFill.setPosition(trackLeft, this.volumeTrack.y);
+    this.volumeFill.setDisplaySize(this.volumeTrack.displayWidth * musicVolume, this.volumeTrack.displayHeight);
+    this.volumeHandle.setPosition(handleX, this.volumeTrack.y);
   }
 }

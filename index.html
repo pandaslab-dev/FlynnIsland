@@ -39,7 +39,17 @@
     Load all scene files BEFORE main.js
     Order matters! Each scene class must exist before main.js tries to use it
   -->
+  <script>
+    window.FlynnBuildId = '__BUILD_ID__';
+    window.FlynnAssetVersion = (
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1'
+    )
+      ? String(Date.now())
+      : window.FlynnBuildId;
+  </script>
   <script src="src/utils/ViewportScaler.js?v=__BUILD_ID__"></script>
+  <script src="src/config/IslandWorldConfig.js?v=__BUILD_ID__"></script>
   <script src="src/scenes/TitleScene.js?v=__BUILD_ID__"></script>
   <script src="src/scenes/NameInputScene.js?v=__BUILD_ID__"></script>
   <script src="src/scenes/DogSelectScene.js?v=__BUILD_ID__"></script>

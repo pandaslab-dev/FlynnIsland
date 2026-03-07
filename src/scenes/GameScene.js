@@ -2,6 +2,42 @@
 // GAME SCENE
 // ============================================
 
+const FALLBACK_ISLAND_WORLD_CONFIG = Object.freeze({
+  worldBounds: Object.freeze({
+    x: 0,
+    y: 0,
+    width: 4096,
+    height: 4096
+  }),
+  spawn: Object.freeze({
+    x: 2048,
+    y: 2048
+  }),
+  islandArt: Object.freeze({
+    textureKey: 'island',
+    imagePath: 'misc_assets/island-4096.png',
+    requestPath: 'misc_assets/island-4096.png',
+    centerX: 2048,
+    centerY: 2048
+  }),
+  collisionMask: Object.freeze({
+    textureKey: 'islandedge',
+    imagePath: 'misc_assets/island-4096-edge.png',
+    requestPath: 'misc_assets/island-4096-edge.png',
+    offsetX: 0,
+    offsetY: 0,
+    blockedColorThreshold: 12
+  })
+});
+
+function getIslandWorldConfig() {
+  if (window.FlynnIslandWorldConfig && window.FlynnIslandWorldConfig.worldBounds) {
+    return window.FlynnIslandWorldConfig;
+  }
+
+  return FALLBACK_ISLAND_WORLD_CONFIG;
+}
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -19,6 +55,12 @@ class GameScene extends Phaser.Scene {
     this.SPEED = 200;
     this.SPRINT_MULTIPLIER = 1.65;
     this.JUMP_TRAVEL_DISTANCE = 44;
+    this.PLAYER_COLLISION_RADIUS = 18;
+    this.PLAYER_COLLISION_OFFSET_Y = 72;
+    this.PLAYER_TORSO_COLLISION_RADIUS = 22;
+    this.PLAYER_TORSO_COLLISION_OFFSET_Y = 38;
+    this.COLLISION_SWEEP_STEP = 4;
+    this.hasWarnedMissingIslandMask = false;
 
     this.emoteKeys = null;
     this.moveVector = new Phaser.Math.Vector2(0, 0);
@@ -56,45 +98,22 @@ class GameScene extends Phaser.Scene {
       sapphire: 'Sapphire',
       wendy: 'Wendy'
     };
+    this.worldConfig = getIslandWorldConfig();
+    this.spawnPoint = {
+      x: this.worldConfig.spawn.x,
+      y: this.worldConfig.spawn.y
+    };
 
     this.worldBounds = {
-      x: 0,
-      y: 0,
-      width: 2048,
-      height: 2048
+      x: this.worldConfig.worldBounds.x,
+      y: this.worldConfig.worldBounds.y,
+      width: this.worldConfig.worldBounds.width,
+      height: this.worldConfig.worldBounds.height
     };
 
     this.islandMaskPixels = null;
     this.islandMaskWidth = 0;
     this.islandMaskHeight = 0;
-
-    this.ballSprite = null;
-    this.ballState = {
-      x: 1024,
-      y: 820,
-      targetX: 1024,
-      targetY: 820,
-      vx: 0,
-      vy: 0,
-      hasServerSnapshot: false
-    };
-    this.BALL_SCALE = 0.18;
-    this.leftScoreText = null;
-    this.rightScoreText = null;
-    this.scoreboardSprite = null;
-    this.topGoalSprite = null;
-    this.bottomGoalSprite = null;
-    this.SCOREBOARD_X = 1462.3;
-    this.SCOREBOARD_Y = 210.23;
-    this.TOP_GOAL_X = 831.79;
-    this.TOP_GOAL_Y = 227.42;
-    this.BOTTOM_GOAL_X = 1347.2;
-    this.BOTTOM_GOAL_Y = 875.89;
-    this.SCOREBOARD_SCALE = 0.9;
-    this.GOAL_SCALE = 0.72;
-    this.LEFT_SCORE_OFFSET_X = -101;
-    this.RIGHT_SCORE_OFFSET_X = 101;
-    this.SCORE_OFFSET_Y = 1;
 
     this.playerData = {
       name: 'Player',
@@ -102,8 +121,8 @@ class GameScene extends Phaser.Scene {
     };
 
     this.localLastSafePosition = {
-      x: 1024,
-      y: 1024
+      x: this.spawnPoint.x,
+      y: this.spawnPoint.y
     };
   }
 
@@ -117,12 +136,14 @@ class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('island', 'misc_assets/island.png');
-    this.load.image('islandedge', 'misc_assets/islandedge.png');
-    this.load.image('ball', 'misc_assets/ball.png');
-    this.load.image('goal_lefttop', 'misc_assets/goal_lefttop.png');
-    this.load.image('goal_rightbottom', 'misc_assets/goal_rightbottom.png');
-    this.load.image('scoreboard', 'misc_assets/scoreboard.png');
+    this.load.image(
+      this.worldConfig.islandArt.textureKey,
+      this.worldConfig.islandArt.requestPath || this.worldConfig.islandArt.imagePath
+    );
+    this.load.image(
+      this.worldConfig.collisionMask.textureKey,
+      this.worldConfig.collisionMask.requestPath || this.worldConfig.collisionMask.imagePath
+    );
 
     this.DOG_KEYS.forEach((dogKey) => {
       this.loadDogAssets(dogKey);
@@ -130,7 +151,11 @@ class GameScene extends Phaser.Scene {
   }
 
   create() {
-    const island = this.add.image(1024, 1024, 'island');
+    const island = this.add.image(
+      this.worldConfig.islandArt.centerX,
+      this.worldConfig.islandArt.centerY,
+      this.worldConfig.islandArt.textureKey
+    );
     island.setOrigin(0.5, 0.5);
 
     this.physics.world.setBounds(
@@ -140,13 +165,21 @@ class GameScene extends Phaser.Scene {
       this.worldBounds.height
     );
 
-    this.cameras.main.setBounds(0, 0, 2048, 2048);
+    this.cameras.main.setBounds(
+      this.worldBounds.x,
+      this.worldBounds.y,
+      this.worldBounds.width,
+      this.worldBounds.height
+    );
     this.updateCameraZoom();
 
     this.createDogAnimations();
     this.buildIslandCollisionMask();
-    this.createBall();
-    this.createSoccerMiniGameDecorations();
+    this.spawnPoint = this.resolveInitialSpawnPoint();
+    this.localLastSafePosition = {
+      x: this.spawnPoint.x,
+      y: this.spawnPoint.y
+    };
 
     this.setupNetworkBridge();
 
@@ -154,8 +187,8 @@ class GameScene extends Phaser.Scene {
       id: this.localPlayerId,
       name: this.playerData.name,
       dogType: this.playerData.dogType,
-      x: 1024,
-      y: 1024,
+      x: this.spawnPoint.x,
+      y: this.spawnPoint.y,
       isLocal: true
     });
 
@@ -200,7 +233,7 @@ class GameScene extends Phaser.Scene {
   }
 
   buildIslandCollisionMask() {
-    const maskTexture = this.textures.get('islandedge');
+    const maskTexture = this.textures.get(this.worldConfig.collisionMask.textureKey);
     if (!maskTexture) {
       return;
     }
@@ -225,101 +258,35 @@ class GameScene extends Phaser.Scene {
     this.islandMaskPixels = imageData.data;
     this.islandMaskWidth = canvas.width;
     this.islandMaskHeight = canvas.height;
+    this.hasWarnedMissingIslandMask = false;
   }
 
-  createBall() {
-    this.ballSprite = this.add.image(
-      this.ballState.x,
-      this.ballState.y,
-      'ball'
+  resolveInitialSpawnPoint() {
+    const configuredSpawn = this.worldConfig.spawn;
+    const walkableSpawn = this.findNearestWalkablePosition(
+      configuredSpawn.x,
+      configuredSpawn.y,
+      220,
+      8
     );
-    this.ballSprite.setScale(this.BALL_SCALE);
-    this.ballSprite.setDepth(60);
-  }
 
-  createSoccerMiniGameDecorations() {
-    this.scoreboardSprite = this.add.image(this.SCOREBOARD_X, this.SCOREBOARD_Y, 'scoreboard');
-    this.scoreboardSprite.setOrigin(0.5, 0.5);
-    this.scoreboardSprite.setScale(this.SCOREBOARD_SCALE);
-    this.scoreboardSprite.setDepth(15);
-
-    this.topGoalSprite = this.add.image(this.TOP_GOAL_X, this.TOP_GOAL_Y, 'goal_lefttop');
-    this.topGoalSprite.setOrigin(0.5, 0.5);
-    this.topGoalSprite.setScale(this.GOAL_SCALE);
-    this.topGoalSprite.setDepth(12);
-
-    this.bottomGoalSprite = this.add.image(this.BOTTOM_GOAL_X, this.BOTTOM_GOAL_Y, 'goal_rightbottom');
-    this.bottomGoalSprite.setOrigin(0.5, 0.5);
-    this.bottomGoalSprite.setScale(this.GOAL_SCALE);
-    this.bottomGoalSprite.setDepth(12);
-
-    const scoreTextStyle = {
-      fontSize: '56px',
-      fontFamily: 'Arial, sans-serif',
-      color: '#ffffff',
-      stroke: '#000000',
-      strokeThickness: 6,
-      align: 'center',
-      shadow: {
-        offsetX: 0,
-        offsetY: 0,
-        color: '#000000',
-        blur: 4,
-        fill: true
-      }
+    return walkableSpawn || {
+      x: configuredSpawn.x,
+      y: configuredSpawn.y
     };
-
-    this.leftScoreText = this.add.text(0, 0, '0', scoreTextStyle);
-    this.leftScoreText.setOrigin(0.5, 0.5);
-    this.leftScoreText.setDepth(16);
-
-    this.rightScoreText = this.add.text(0, 0, '0', scoreTextStyle);
-    this.rightScoreText.setOrigin(0.5, 0.5);
-    this.rightScoreText.setDepth(16);
-
-    this.updateScoreTextPositionsFromScoreboard();
-  }
-
-  updateScoreTextPositionsFromScoreboard() {
-    if (!this.scoreboardSprite || !this.leftScoreText || !this.rightScoreText) {
-      return;
-    }
-
-    this.leftScoreText.setPosition(
-      this.scoreboardSprite.x + this.LEFT_SCORE_OFFSET_X,
-      this.scoreboardSprite.y + this.SCORE_OFFSET_Y
-    );
-
-    this.rightScoreText.setPosition(
-      this.scoreboardSprite.x + this.RIGHT_SCORE_OFFSET_X,
-      this.scoreboardSprite.y + this.SCORE_OFFSET_Y
-    );
-  }
-
-  applyBallState(ballSnapshot) {
-    if (!ballSnapshot || !Number.isFinite(ballSnapshot.x) || !Number.isFinite(ballSnapshot.y)) {
-      return;
-    }
-
-    this.ballState.targetX = ballSnapshot.x;
-    this.ballState.targetY = ballSnapshot.y;
-    this.ballState.vx = Number.isFinite(ballSnapshot.vx) ? ballSnapshot.vx : 0;
-    this.ballState.vy = Number.isFinite(ballSnapshot.vy) ? ballSnapshot.vy : 0;
-
-    if (this.ballSprite && !this.ballState.hasServerSnapshot) {
-      this.ballSprite.setPosition(this.ballState.targetX, this.ballState.targetY);
-    }
-
-    this.ballState.hasServerSnapshot = true;
   }
 
   isBlockedAtWorldPoint(worldX, worldY) {
     if (!this.islandMaskPixels) {
-      return false;
+      if (!this.hasWarnedMissingIslandMask) {
+        console.warn('Island collision mask is unavailable on client; blocking movement until mask is loaded.');
+        this.hasWarnedMissingIslandMask = true;
+      }
+      return true;
     }
 
-    const pixelX = Math.floor(worldX);
-    const pixelY = Math.floor(worldY);
+    const pixelX = Math.floor(worldX + this.worldConfig.collisionMask.offsetX);
+    const pixelY = Math.floor(worldY + this.worldConfig.collisionMask.offsetY);
 
     if (
       pixelX < 0 ||
@@ -340,18 +307,12 @@ class GameScene extends Phaser.Scene {
       return false;
     }
 
-    return r < 12 && g < 12 && b < 12;
+    const blockedColorThreshold = this.worldConfig.collisionMask.blockedColorThreshold;
+    return r < blockedColorThreshold && g < blockedColorThreshold && b < blockedColorThreshold;
   }
 
   canPlayerOccupy(worldX, worldY) {
-    const sampleRadius = 34;
-    const points = [
-      { x: worldX, y: worldY },
-      { x: worldX + sampleRadius, y: worldY },
-      { x: worldX - sampleRadius, y: worldY },
-      { x: worldX, y: worldY + sampleRadius },
-      { x: worldX, y: worldY - sampleRadius }
-    ];
+    const points = this.getPlayerCollisionProbePoints(worldX, worldY);
 
     for (const point of points) {
       if (this.isBlockedAtWorldPoint(point.x, point.y)) {
@@ -360,6 +321,70 @@ class GameScene extends Phaser.Scene {
     }
 
     return true;
+  }
+
+  getPlayerCollisionProbePoints(worldX, worldY) {
+    return [
+      ...this.buildCollisionProbeRing(
+        worldX,
+        worldY + this.PLAYER_COLLISION_OFFSET_Y,
+        this.PLAYER_COLLISION_RADIUS
+      ),
+      ...this.buildCollisionProbeRing(
+        worldX,
+        worldY + this.PLAYER_TORSO_COLLISION_OFFSET_Y,
+        this.PLAYER_TORSO_COLLISION_RADIUS
+      )
+    ];
+  }
+
+  buildCollisionProbeRing(originX, originY, radius) {
+    const diagonalRadius = radius * 0.78;
+    const innerRadius = radius * 0.5;
+
+    return [
+      { x: originX, y: originY },
+      { x: originX + radius, y: originY },
+      { x: originX - radius, y: originY },
+      { x: originX, y: originY + radius },
+      { x: originX, y: originY - radius },
+      { x: originX + diagonalRadius, y: originY + diagonalRadius },
+      { x: originX - diagonalRadius, y: originY + diagonalRadius },
+      { x: originX + diagonalRadius, y: originY - diagonalRadius },
+      { x: originX - diagonalRadius, y: originY - diagonalRadius },
+      { x: originX + innerRadius, y: originY },
+      { x: originX - innerRadius, y: originY },
+      { x: originX, y: originY + innerRadius },
+      { x: originX, y: originY - innerRadius }
+    ];
+  }
+
+  sweepToWalkablePosition(startX, startY, targetX, targetY, stepSize = this.COLLISION_SWEEP_STEP) {
+    const deltaX = targetX - startX;
+    const deltaY = targetY - startY;
+    const distance = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
+    const steps = Math.max(1, Math.ceil(distance / Math.max(stepSize, 1)));
+
+    let lastWalkableX = startX;
+    let lastWalkableY = startY;
+
+    for (let step = 1; step <= steps; step += 1) {
+      const t = step / steps;
+      const sampleX = startX + (deltaX * t);
+      const sampleY = startY + (deltaY * t);
+
+      if (!this.canPlayerOccupy(sampleX, sampleY)) {
+        break;
+      }
+
+      lastWalkableX = sampleX;
+      lastWalkableY = sampleY;
+    }
+
+    return {
+      x: lastWalkableX,
+      y: lastWalkableY
+    };
   }
 
   createDogAnimations() {
@@ -426,8 +451,8 @@ class GameScene extends Phaser.Scene {
       id: this.localPlayerId,
       name: this.playerData.name,
       dogType: this.playerData.dogType,
-      x: 1024,
-      y: 1024
+      x: this.spawnPoint.x,
+      y: this.spawnPoint.y
     }) || this.localPlayerId;
   }
 
@@ -480,9 +505,11 @@ class GameScene extends Phaser.Scene {
     let playerEntity = this.players[playerId];
 
     if (!playerEntity) {
+      const spawnX = playerData.x ?? this.spawnPoint.x;
+      const spawnY = playerData.y ?? this.spawnPoint.y;
       const sprite = this.physics.add.sprite(
-        playerData.x ?? 1024,
-        playerData.y ?? 1024,
+        spawnX,
+        spawnY,
         `${dogKey}_stand`
       );
       sprite.setScale(0.3);
@@ -587,18 +614,6 @@ class GameScene extends Phaser.Scene {
   }
 
   applyWorldState(worldState) {
-    if (worldState && typeof worldState === 'object' && worldState.ball) {
-      this.applyBallState(worldState.ball);
-    }
-    if (worldState && typeof worldState === 'object' && worldState.scores) {
-      if (this.leftScoreText && Number.isFinite(worldState.scores.left)) {
-        this.leftScoreText.setText(String(worldState.scores.left));
-      }
-      if (this.rightScoreText && Number.isFinite(worldState.scores.right)) {
-        this.rightScoreText.setText(String(worldState.scores.right));
-      }
-    }
-
     const playersSnapshot = Array.isArray(worldState)
       ? worldState
       : Array.isArray(worldState?.players)
@@ -740,6 +755,7 @@ class GameScene extends Phaser.Scene {
 
     const playerX = localPlayer.sprite.x;
     const playerY = localPlayer.sprite.y;
+    const collisionOriginY = playerY + this.PLAYER_COLLISION_OFFSET_Y;
     const probeRadius = 44;
     const directions = [
       { x: 1, y: 0 },
@@ -755,7 +771,7 @@ class GameScene extends Phaser.Scene {
     const pushVector = new Phaser.Math.Vector2(0, 0);
     directions.forEach((direction) => {
       const sampleX = playerX + (direction.x * probeRadius);
-      const sampleY = playerY + (direction.y * probeRadius);
+      const sampleY = collisionOriginY + (direction.y * probeRadius);
 
       if (this.isBlockedAtWorldPoint(sampleX, sampleY)) {
         // Repel away from blocked edge samples.
@@ -805,8 +821,16 @@ class GameScene extends Phaser.Scene {
     const desiredLandingX = startX + (jumpVector.x * jumpDistance);
     const desiredLandingY = startY + (jumpVector.y * jumpDistance);
 
-    if (this.canPlayerOccupy(desiredLandingX, desiredLandingY)) {
-      return { x: desiredLandingX, y: desiredLandingY };
+    const sweptLanding = this.sweepToWalkablePosition(startX, startY, desiredLandingX, desiredLandingY);
+    if (
+      Math.abs(sweptLanding.x - desiredLandingX) < 0.01 &&
+      Math.abs(sweptLanding.y - desiredLandingY) < 0.01
+    ) {
+      return sweptLanding;
+    }
+
+    if (Math.abs(sweptLanding.x - startX) > 0.01 || Math.abs(sweptLanding.y - startY) > 0.01) {
+      return sweptLanding;
     }
 
     // Find the furthest valid point along the jump path before obstacles.
@@ -1239,7 +1263,8 @@ class GameScene extends Phaser.Scene {
   update(time, delta) {
     const localPlayer = this.getLocalPlayer();
     if (!localPlayer) {
-      this.interpolateBall(delta);
+      this.interpolateRemotePlayers(delta);
+      this.updateAllPlayerDecorations();
       return;
     }
 
@@ -1303,8 +1328,8 @@ class GameScene extends Phaser.Scene {
       });
 
       this.mobileJumpRequested = false;
+      this.interpolateRemotePlayers(delta);
       this.updateAllPlayerDecorations();
-      this.interpolateBall(delta);
       this.sendNetworkInput(time, 'jump', true);
       return;
     }
@@ -1313,7 +1338,6 @@ class GameScene extends Phaser.Scene {
     if (this.isJumping) {
       this.updateAllPlayerDecorations();
       this.interpolateRemotePlayers(delta);
-      this.interpolateBall(delta);
       return;
     }
 
@@ -1368,13 +1392,21 @@ class GameScene extends Phaser.Scene {
     const moveStep = moveSpeed * (delta / 1000);
     const targetX = localPlayer.sprite.x + (this.moveVector.x * moveStep);
     const targetY = localPlayer.sprite.y + (this.moveVector.y * moveStep);
+    const resolvedX = this.sweepToWalkablePosition(
+      localPlayer.sprite.x,
+      localPlayer.sprite.y,
+      targetX,
+      localPlayer.sprite.y
+    );
+    localPlayer.sprite.x = resolvedX.x;
 
-    if (this.canPlayerOccupy(targetX, localPlayer.sprite.y)) {
-      localPlayer.sprite.x = targetX;
-    }
-    if (this.canPlayerOccupy(localPlayer.sprite.x, targetY)) {
-      localPlayer.sprite.y = targetY;
-    }
+    const resolvedY = this.sweepToWalkablePosition(
+      localPlayer.sprite.x,
+      localPlayer.sprite.y,
+      localPlayer.sprite.x,
+      targetY
+    );
+    localPlayer.sprite.y = resolvedY.y;
 
     const isMoving = this.moveVector.lengthSq() > 0;
 
@@ -1392,7 +1424,6 @@ class GameScene extends Phaser.Scene {
 
     this.ensureLocalPlayerOnWalkableGround(localPlayer);
     this.interpolateRemotePlayers(delta);
-    this.interpolateBall(delta);
     this.updateAllPlayerDecorations();
 
     this.sendNetworkInput(time, isMoving ? (isSprinting ? 'run' : 'walk') : 'stand');
@@ -1411,21 +1442,6 @@ class GameScene extends Phaser.Scene {
         playerEntity.sprite.y = Phaser.Math.Linear(playerEntity.sprite.y, playerEntity.targetY, smoothing);
       }
     });
-  }
-
-  interpolateBall(delta) {
-    if (!this.ballSprite) {
-      return;
-    }
-
-    const smoothing = Phaser.Math.Clamp((delta / 1000) * 14, 0, 1);
-
-    this.ballSprite.x = Phaser.Math.Linear(this.ballSprite.x, this.ballState.targetX, smoothing);
-    this.ballSprite.y = Phaser.Math.Linear(this.ballSprite.y, this.ballState.targetY, smoothing);
-
-    const speed = Math.sqrt((this.ballState.vx * this.ballState.vx) + (this.ballState.vy * this.ballState.vy));
-    const rollDirection = this.ballState.vx < 0 ? -1 : 1;
-    this.ballSprite.rotation += ((speed / 650) * (delta / 16.6667)) * 0.08 * rollDirection;
   }
 
   sendNetworkInput(time, animationState, force = false) {
@@ -1555,10 +1571,5 @@ class GameScene extends Phaser.Scene {
       this.jumpTween = null;
     }
     this.isJumping = false;
-
-    if (this.ballSprite) {
-      this.ballSprite.destroy();
-      this.ballSprite = null;
-    }
   }
 }
