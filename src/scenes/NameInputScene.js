@@ -13,6 +13,7 @@ class NameInputScene extends Phaser.Scene {
     this.dialog = null;
     this.continueButton = null;
     this.transitioningToDogSelect = false;
+    this.transitionDelayTimer = null;
   }
   
   preload() {
@@ -130,8 +131,9 @@ class NameInputScene extends Phaser.Scene {
     
     this.positionHTMLInput();
 
-    // Auto-focus after initial placement
-    inputElement.focus();
+    if (!this.getViewportFlags().hasTouch) {
+      inputElement.focus();
+    }
   }
   
   positionHTMLInput() {
@@ -256,13 +258,29 @@ class NameInputScene extends Phaser.Scene {
         element.blur();
       }
 
+      element.disabled = true;
       element.style.pointerEvents = 'none';
       element.style.visibility = 'hidden';
+      element.style.opacity = '0';
 
       if (element.parentNode) {
         element.parentNode.removeChild(element);
       }
     });
+  }
+
+  resetScenePointers() {
+    if (!this.input) {
+      return;
+    }
+
+    if (typeof this.input.resetPointers === 'function') {
+      this.input.resetPointers();
+    }
+
+    if (this.input.manager && typeof this.input.manager.resetPointers === 'function') {
+      this.input.manager.resetPointers();
+    }
   }
 
   beginDogSelectTransition() {
@@ -272,6 +290,12 @@ class NameInputScene extends Phaser.Scene {
 
     this.transitioningToDogSelect = true;
     this.continueButton.disableInteractive();
+    this.resetScenePointers();
+
+    if (this.htmlInput && typeof this.htmlInput.blur === 'function') {
+      this.htmlInput.blur();
+    }
+
     this.removeHTMLInput();
 
     this.tweens.add({
@@ -281,7 +305,18 @@ class NameInputScene extends Phaser.Scene {
       duration: 50,
       yoyo: true,
       onComplete: () => {
-        this.scene.start('DogSelectScene', { playerName: this.playerName });
+        const startDogSelect = () => {
+          window.scrollTo(0, 0);
+          this.resetScenePointers();
+          this.scene.start('DogSelectScene', { playerName: this.playerName });
+        };
+
+        if (this.getViewportFlags().hasTouch) {
+          this.transitionDelayTimer = this.time.delayedCall(220, startDogSelect);
+          return;
+        }
+
+        startDogSelect();
       }
     });
   }
@@ -326,6 +361,11 @@ class NameInputScene extends Phaser.Scene {
   }
   
   handleSceneShutdown() {
+    if (this.transitionDelayTimer) {
+      this.transitionDelayTimer.remove(false);
+      this.transitionDelayTimer = null;
+    }
+
     this.removeHTMLInput();
   }
 }

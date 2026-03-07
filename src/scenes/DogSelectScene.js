@@ -42,6 +42,8 @@ class DogSelectScene extends Phaser.Scene {
       this.backgroundImage = window.FlynnMenuBackground.create(this);
     }
     this.clearLingeringNameInput();
+    this.resetScenePointers();
+    this.input.enabled = true;
 
     this.titleImage = this.add.image(0, 0, 'choosedog_top');
 
@@ -78,6 +80,11 @@ class DogSelectScene extends Phaser.Scene {
     this.resizeHandler = () => this.layoutScene();
     this.scale.on('resize', this.resizeHandler);
 
+    this.time.delayedCall(120, () => {
+      this.resetScenePointers();
+      this.input.enabled = true;
+    });
+
     this.events.once('shutdown', this.handleSceneShutdown, this);
     this.events.once('destroy', this.handleSceneShutdown, this);
   }
@@ -89,13 +96,33 @@ class DogSelectScene extends Phaser.Scene {
     }
 
     document.querySelectorAll('#nameInput').forEach((element) => {
+      if (document.activeElement === element && typeof element.blur === 'function') {
+        element.blur();
+      }
+
+      element.disabled = true;
       element.style.pointerEvents = 'none';
       element.style.visibility = 'hidden';
+      element.style.opacity = '0';
 
       if (element.parentNode) {
         element.parentNode.removeChild(element);
       }
     });
+  }
+
+  resetScenePointers() {
+    if (!this.input) {
+      return;
+    }
+
+    if (typeof this.input.resetPointers === 'function') {
+      this.input.resetPointers();
+    }
+
+    if (this.input.manager && typeof this.input.manager.resetPointers === 'function') {
+      this.input.manager.resetPointers();
+    }
   }
   
   createDogButton(dogData) {
