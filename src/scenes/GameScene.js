@@ -2098,7 +2098,7 @@ class GameScene extends Phaser.Scene {
       x: localPlayer.sprite.x,
       y: localPlayer.sprite.y,
       flipX: isDriving ? false : localPlayer.sprite.flipX,
-      carThrottle: isDriving ? Phaser.Math.Clamp(-this.moveVector.y, -1, 1) : 0,
+      carThrottle: isDriving ? Phaser.Math.Clamp(this.moveVector.y, -1, 1) : 0,
       carSteer: isDriving ? Phaser.Math.Clamp(this.moveVector.x, -1, 1) : 0,
       carBoost: isDriving ? this.getIsSprinting() : false,
       exitCar

@@ -623,7 +623,7 @@ function sanitizeCarInput(payload = {}) {
       Number.isFinite(payload.carThrottle)
         ? payload.carThrottle
         : Number.isFinite(payload.moveY)
-          ? -payload.moveY
+          ? payload.moveY
           : 0,
       -1,
       1
