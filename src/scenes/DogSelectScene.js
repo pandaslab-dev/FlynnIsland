@@ -2,16 +2,15 @@
 // DOG SELECT SCENE
 // ============================================
 // Player chooses their dog (Alice, Remix, Sapphire, or Wendy)
-// Displays all dogs in slots from selectdogdialog.png background
+// Uses direct image buttons for each dog choice
 
 class DogSelectScene extends Phaser.Scene {
   constructor() {
     super({ key: 'DogSelectScene' });
     this.playerName = '';
-    this.dialog = null;
-    this.dogSlots = [];
+    this.titleImage = null;
+    this.dogButtons = [];
     this.resizeHandler = null;
-    this.scenePointerHandler = null;
     this.selectionLocked = false;
   }
   
@@ -25,164 +24,103 @@ class DogSelectScene extends Phaser.Scene {
   }
   
   preload() {
-    // Load dialog background with dog name slots
-    this.load.image('selectdogdialog', 'misc_assets/selectdogdialog.png');
-    
-    // Load standing sprite for each dog (for preview in slots)
-    this.load.image('alice_stand', 'sprites/dogs/alice/alice_stand.png');
-    this.load.image('remix_stand', 'sprites/dogs/remix/remix_stand.png');
-    this.load.image('sapphire_stand', 'sprites/dogs/sapphire/sapphire_stand.png');
-    this.load.image('wendy_stand', 'sprites/dogs/wendy/wendy_stand.png');
+    this.load.image('choosedog_top', 'misc_assets/choosedog-top.png');
+    this.load.image('choosedog_alice', 'misc_assets/choosedog-alice.png');
+    this.load.image('choosedog_remix', 'misc_assets/choosedog-remix.png');
+    this.load.image('choosedog_sapphire', 'misc_assets/choosedog-sapphire.png');
+    this.load.image('choosedog_wendy', 'misc_assets/choosedog-wendy.png');
   }
   
   create() {
-    // Set background
     this.cameras.main.setBackgroundColor('#87CEEB');
 
-    // Add dialog background
-    this.dialog = this.add.image(0, 0, 'selectdogdialog');
-    
-    // Define dog data and their positions in the grid
-    // Positions match the 4 slots in selectdogdialog.png
+    this.titleImage = this.add.image(0, 0, 'choosedog_top');
+
     const dogs = [
-      { 
-        name: 'Alice',      // Display name (capitalized)
-        key: 'alice',       // Asset key (lowercase)
+      {
+        name: 'Alice',
+        buttonKey: 'choosedog_alice',
         column: -1,
         row: 0
       },
-      { 
-        name: 'Remix', 
-        key: 'remix',
+      {
+        name: 'Remix',
+        buttonKey: 'choosedog_remix',
         column: 1,
         row: 0
       },
-      { 
-        name: 'Sapphire', 
-        key: 'sapphire',
+      {
+        name: 'Sapphire',
+        buttonKey: 'choosedog_sapphire',
         column: -1,
         row: 1
       },
-      { 
+      {
         name: 'Wendy', 
-        key: 'wendy',
+        buttonKey: 'choosedog_wendy',
         column: 1,
         row: 1
       }
     ];
     
-    // Create clickable slot for each dog
-    this.dogSlots = dogs.map((dog) => this.createDogSlot(dog));
+    this.dogButtons = dogs.map((dog) => this.createDogButton(dog));
 
     this.layoutScene();
     this.resizeHandler = () => this.layoutScene();
     this.scale.on('resize', this.resizeHandler);
-    this.scenePointerHandler = (pointer, currentlyOver) => {
-      if (this.selectionLocked) {
-        return;
-      }
-
-      if (Array.isArray(currentlyOver) && currentlyOver.length > 0) {
-        return;
-      }
-
-      this.trySelectSlotAt(pointer.x, pointer.y);
-    };
-    this.input.on('pointerdown', this.scenePointerHandler);
 
     this.events.once('shutdown', this.handleSceneShutdown, this);
     this.events.once('destroy', this.handleSceneShutdown, this);
   }
   
-  createDogSlot(dogData) {
-    // Add dog sprite at specified position
-    const dogSprite = this.add.sprite(0, 0, `${dogData.key}_stand`);
-    dogSprite.setScale(0.25);  // Scale to fit nicely in slot
-    
-    // Create invisible clickable area over the slot
-    // This makes the entire slot clickable, not just the sprite pixels
-    const clickZone = this.add.rectangle(
-      0,
-      0,
-      200,         // Width of clickable area (larger than sprite)
-      200,         // Height of clickable area
-      0x000000,    // Color (black, but won't show because alpha = 0)
-      0            // Alpha 0 = completely invisible
-    );
+  createDogButton(dogData) {
+    const button = this.add.image(0, 0, dogData.buttonKey);
 
     const slot = {
       dogData,
-      sprite: dogSprite,
-      clickZone,
-      hitRadius: 100,
+      button,
       scales: {
-        base: 0.25,
-        hover: 0.28,
-        pressed: 0.23
+        base: 1,
+        hover: 1.05,
+        pressed: 0.96
       }
     };
-    
-    // Make the invisible rectangle interactive
-    clickZone.setInteractive({ useHandCursor: true });
-    dogSprite.setInteractive({ useHandCursor: true });
-    
-    // HOVER IN - scale up dog sprite for feedback
-    clickZone.on('pointerover', () => {
+
+    button.setInteractive({ useHandCursor: true });
+
+    button.on('pointerover', () => {
+      if (this.selectionLocked) {
+        return;
+      }
+
       this.tweens.add({
-        targets: slot.sprite,
+        targets: button,
         scaleX: slot.scales.hover,
         scaleY: slot.scales.hover,
         duration: 100,
         ease: 'Power2'
       });
     });
-    
-    // HOVER OUT - scale back to normal
-    clickZone.on('pointerout', () => {
+
+    button.on('pointerout', () => {
+      if (this.selectionLocked) {
+        return;
+      }
+
       this.tweens.add({
-        targets: slot.sprite,
+        targets: button,
         scaleX: slot.scales.base,
         scaleY: slot.scales.base,
         duration: 100,
         ease: 'Power2'
       });
     });
-    
-    // CLICK - select this dog and start game
-    clickZone.on('pointerdown', () => {
-      this.selectDog(slot);
-    });
 
-    dogSprite.on('pointerdown', () => {
+    button.on('pointerdown', () => {
       this.selectDog(slot);
     });
 
     return slot;
-  }
-
-  trySelectSlotAt(pointerX, pointerY) {
-    let bestSlot = null;
-    let bestDistanceSq = Number.POSITIVE_INFINITY;
-
-    this.dogSlots.forEach((slot) => {
-      const dx = pointerX - slot.sprite.x;
-      const dy = pointerY - slot.sprite.y;
-      const distanceSq = (dx * dx) + (dy * dy);
-      const hitRadius = slot.hitRadius || 100;
-
-      if (distanceSq > (hitRadius * hitRadius)) {
-        return;
-      }
-
-      if (distanceSq < bestDistanceSq) {
-        bestDistanceSq = distanceSq;
-        bestSlot = slot;
-      }
-    });
-
-    if (bestSlot) {
-      this.selectDog(bestSlot);
-    }
   }
 
   selectDog(slot) {
@@ -191,19 +129,20 @@ class DogSelectScene extends Phaser.Scene {
     }
 
     this.selectionLocked = true;
+    this.dogButtons.forEach((dogButton) => {
+      dogButton.button.disableInteractive();
+    });
 
-    // Visual feedback - quick scale down
     this.tweens.add({
-      targets: slot.sprite,
+      targets: slot.button,
       scaleX: slot.scales.pressed,
       scaleY: slot.scales.pressed,
       duration: 50,
       yoyo: true,
       onComplete: () => {
-        // Start GameScene and pass BOTH player name AND selected dog
         this.scene.start('GameScene', {
-          playerName: this.playerName,   // From NameInputScene
-          dogType: slot.dogData.name     // Selected dog (Alice, Remix, etc.)
+          playerName: this.playerName,
+          dogType: slot.dogData.name
         });
       }
     });
@@ -222,58 +161,74 @@ class DogSelectScene extends Phaser.Scene {
   }
 
   layoutScene() {
-    if (!this.dialog) {
+    if (!this.titleImage || this.dogButtons.length === 0) {
       return;
     }
 
-    const centerX = this.scale.width / 2;
-    const centerY = this.scale.height / 2;
     const flags = this.getViewportFlags();
     const isPhone = flags.hasTouch && !flags.isTablet;
-    const uiScale = window.FlynnViewportScaler
-      ? window.FlynnViewportScaler.getUiScale(this.scale.width, this.scale.height)
-      : 1;
-    const isPortraitViewport = flags.isPortrait;
-    const margin = isPhone ? 34 : 26;
+    const centerX = this.scale.width / 2;
+    const marginX = isPhone ? 24 : 36;
+    const marginY = isPhone ? 28 : 36;
+    const availableWidth = this.scale.width - (marginX * 2);
+    const availableHeight = this.scale.height - (marginY * 2);
+    const columnGap = flags.isPortrait
+      ? (isPhone ? 14 : 22)
+      : (isPhone ? 18 : 26);
+    const rowGap = flags.isPortrait
+      ? (isPhone ? 16 : 24)
+      : (isPhone ? 14 : 20);
+    const titleGap = flags.isPortrait
+      ? (isPhone ? 18 : 26)
+      : (isPhone ? 12 : 18);
 
-    const baseDialogScale = 0.8;
+    let titleScale = flags.isPortrait
+      ? (flags.isTablet ? 0.82 : isPhone ? 0.84 : 0.8)
+      : (isPhone ? 0.56 : 0.72);
+    titleScale = Math.min(titleScale, availableWidth / this.titleImage.width);
 
-    let dialogScale = isPortraitViewport
-      ? (flags.isTablet ? 0.72 : isPhone ? 0.58 : 0.65)
-      : isPhone
-        ? 0.62
-        : Phaser.Math.Clamp(0.78 + ((uiScale - 1) * 0.15), 0.72, 0.86);
-    const maxDialogScaleByWidth = (this.scale.width - (margin * 2)) / this.dialog.width;
-    const maxDialogScaleByHeight = (this.scale.height - (margin * 2)) / this.dialog.height;
-    dialogScale = Math.min(dialogScale, maxDialogScaleByWidth, maxDialogScaleByHeight);
-
-    const dialogRatio = dialogScale / baseDialogScale;
-    const xOffset = 120 * dialogRatio;
-    const topRowY = centerY - (78 * dialogRatio);
-    const bottomRowY = centerY + (122 * dialogRatio);
-    const slotBaseScale = Phaser.Math.Clamp(0.25 * dialogRatio, 0.16, 0.3);
-    const clickZoneSize = Math.round(
-      Phaser.Math.Clamp(200 * dialogRatio, 130, 240)
+    const sampleButton = this.dogButtons[0].button;
+    const buttonWidth = sampleButton.width;
+    const buttonHeight = sampleButton.height;
+    const buttonBaseScale = flags.isPortrait
+      ? (flags.isTablet ? 0.94 : isPhone ? 0.96 : 0.9)
+      : (isPhone ? 0.68 : 0.8);
+    const maxScaleByWidth = (availableWidth - columnGap) / (buttonWidth * 2);
+    const reservedHeight = (this.titleImage.height * titleScale) + titleGap + rowGap;
+    const maxScaleByHeight = (availableHeight - reservedHeight) / (buttonHeight * 2);
+    const buttonScale = Math.max(
+      0.4,
+      Math.min(buttonBaseScale, maxScaleByWidth, maxScaleByHeight)
+    );
+    const titleHeight = this.titleImage.height * titleScale;
+    const buttonRowWidth = (buttonWidth * buttonScale * 2) + columnGap;
+    const buttonRowHeight = buttonHeight * buttonScale;
+    const contentHeight = titleHeight + titleGap + (buttonRowHeight * 2) + rowGap;
+    const maxContentTop = Math.max(marginY, this.scale.height - marginY - contentHeight);
+    const contentTop = Phaser.Math.Clamp(
+      ((this.scale.height - contentHeight) / 2) + (flags.isPortrait && isPhone ? 28 : 0),
+      marginY,
+      maxContentTop
     );
 
-    this.dialog.setPosition(centerX, centerY);
-    this.dialog.setScale(dialogScale);
+    this.titleImage.setScale(titleScale);
+    this.titleImage.setPosition(centerX, contentTop + (titleHeight / 2));
 
-    this.dogSlots.forEach((slot) => {
-      const isTopRow = slot.dogData.row === 0;
-      const x = centerX + (slot.dogData.column * xOffset);
-      const y = isTopRow ? topRowY : bottomRowY;
+    const leftX = centerX - (buttonRowWidth / 2) + ((buttonWidth * buttonScale) / 2);
+    const rightX = centerX + (buttonRowWidth / 2) - ((buttonWidth * buttonScale) / 2);
+    const topRowY = contentTop + titleHeight + titleGap + (buttonRowHeight / 2);
+    const bottomRowY = topRowY + buttonRowHeight + rowGap;
 
-      slot.scales.base = slotBaseScale;
-      slot.scales.hover = slotBaseScale + 0.03;
-      slot.scales.pressed = Math.max(slotBaseScale - 0.02, 0.2);
+    this.dogButtons.forEach((slot) => {
+      const x = slot.dogData.column < 0 ? leftX : rightX;
+      const y = slot.dogData.row === 0 ? topRowY : bottomRowY;
 
-      slot.sprite.setPosition(x, y);
-      slot.sprite.setScale(slot.scales.base);
+      slot.scales.base = buttonScale;
+      slot.scales.hover = buttonScale + 0.04;
+      slot.scales.pressed = Math.max(buttonScale - 0.04, 0.4);
 
-      slot.clickZone.setPosition(x, y);
-      slot.clickZone.setSize(clickZoneSize, clickZoneSize);
-      slot.hitRadius = clickZoneSize * 0.5;
+      slot.button.setPosition(x, y);
+      slot.button.setScale(slot.scales.base);
     });
   }
 
@@ -281,11 +236,6 @@ class DogSelectScene extends Phaser.Scene {
     if (this.resizeHandler) {
       this.scale.off('resize', this.resizeHandler);
       this.resizeHandler = null;
-    }
-
-    if (this.scenePointerHandler) {
-      this.input.off('pointerdown', this.scenePointerHandler);
-      this.scenePointerHandler = null;
     }
   }
 }

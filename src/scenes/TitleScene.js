@@ -156,30 +156,28 @@ class TitleScene extends Phaser.Scene {
     logoScale = Math.min(logoScale, maxWidth / this.logo.width);
     buttonBaseScale = Math.min(buttonBaseScale, maxWidth / this.playButton.width);
 
+    this.logo.setScale(logoScale);
+    this.playButton.setScale(buttonBaseScale);
+
     this.playButtonScales.base = buttonBaseScale;
     this.playButtonScales.hover = buttonBaseScale + 0.04;
     this.playButtonScales.pressed = Math.max(buttonBaseScale - 0.04, 0.2);
 
-    let logoY = centerY - (
-      flags.isPortrait
-        ? (flags.isTablet ? 220 : isPhone ? 170 : 200)
-        : (isPhone ? 86 : 130)
-    );
     let buttonY = centerY + (
       flags.isPortrait
-        ? (flags.isTablet ? 132 : isPhone ? 126 : 120)
+        ? (flags.isTablet ? 132 : isPhone ? 118 : 120)
         : (isPhone ? 88 : 120)
     );
+    const logoGap = flags.isPortrait
+      ? (flags.isTablet ? 38 : isPhone ? 18 : 24)
+      : (isPhone ? 16 : 22);
+    let logoY = buttonY - ((this.logo.displayHeight + this.playButton.displayHeight) / 2) - logoGap;
 
     const sliderWidth = Phaser.Math.Clamp(this.scale.width * (flags.isPortrait ? 0.52 : 0.3), 190, 320);
     const sliderHeight = isPhone ? 10 : 12;
     let volumeLabelY = buttonY + (this.playButton.displayHeight / 2) + (flags.isPortrait ? 40 : 34);
     let volumeTrackY = volumeLabelY + 28;
-
-    this.logo.setScale(logoScale);
     this.logo.setPosition(centerX, logoY);
-
-    this.playButton.setScale(this.playButtonScales.base);
     this.playButton.setPosition(centerX, buttonY);
 
     this.volumeLabel.setPosition(centerX, volumeLabelY);
