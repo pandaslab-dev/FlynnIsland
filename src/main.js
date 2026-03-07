@@ -42,6 +42,7 @@ const config = {
     TitleScene,
     NameInputScene,
     DogSelectScene,
+    LoadingScene,
     GameScene
   ]
 };

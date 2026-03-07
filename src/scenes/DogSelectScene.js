@@ -157,7 +157,7 @@ class DogSelectScene extends Phaser.Scene {
       duration: 50,
       yoyo: true,
       onComplete: () => {
-        this.scene.start('GameScene', {
+        this.scene.start('LoadingScene', {
           playerName: this.playerName,
           dogType: slot.dogData.name
         });

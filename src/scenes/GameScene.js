@@ -181,6 +181,16 @@ class GameScene extends Phaser.Scene {
   }
 
   preload() {
+    if (window.FlynnGameAssetLoader && typeof window.FlynnGameAssetLoader.queueGameAssets === 'function') {
+      window.FlynnGameAssetLoader.queueGameAssets(
+        this,
+        this.worldConfig,
+        this.racingConfig,
+        this.DOG_KEYS
+      );
+      return;
+    }
+
     this.load.image(
       this.worldConfig.islandArt.textureKey,
       this.worldConfig.islandArt.requestPath || this.worldConfig.islandArt.imagePath
@@ -189,10 +199,7 @@ class GameScene extends Phaser.Scene {
       this.worldConfig.collisionMask.textureKey,
       this.worldConfig.collisionMask.requestPath || this.worldConfig.collisionMask.imagePath
     );
-
-    this.DOG_KEYS.forEach((dogKey) => {
-      this.loadDogAssets(dogKey);
-    });
+    this.loadDogAssets(this.DOG_KEYS);
 
     this.carDefinitions.forEach((definition) => {
       this.load.image(
@@ -276,16 +283,20 @@ class GameScene extends Phaser.Scene {
     this.events.once('destroy', this.handleSceneShutdown, this);
   }
 
-  loadDogAssets(dogKey) {
-    this.load.image(`${dogKey}_stand`, `sprites/dogs/${dogKey}/${dogKey}_stand.png`);
-    this.load.image(`${dogKey}_sit`, `sprites/dogs/${dogKey}/${dogKey}_sit.png`);
-    this.load.image(`${dogKey}_walk1`, `sprites/dogs/${dogKey}/${dogKey}_walk1.png`);
-    this.load.image(`${dogKey}_walk2`, `sprites/dogs/${dogKey}/${dogKey}_walk2.png`);
-    this.load.image(`${dogKey}_walk3`, `sprites/dogs/${dogKey}/${dogKey}_walk3.png`);
-    this.load.image(`${dogKey}_run1`, `sprites/dogs/${dogKey}/${dogKey}_run1.png`);
-    this.load.image(`${dogKey}_run2`, `sprites/dogs/${dogKey}/${dogKey}_run2.png`);
-    this.load.image(`${dogKey}_jump_up`, `sprites/dogs/${dogKey}/${dogKey}_jump_up.png`);
-    this.load.image(`${dogKey}_jump_down`, `sprites/dogs/${dogKey}/${dogKey}_jump_down.png`);
+  loadDogAssets(dogKeys) {
+    const keys = Array.isArray(dogKeys) ? dogKeys : [dogKeys];
+
+    keys.forEach((dogKey) => {
+      this.load.image(`${dogKey}_stand`, `sprites/dogs/${dogKey}/${dogKey}_stand.png`);
+      this.load.image(`${dogKey}_sit`, `sprites/dogs/${dogKey}/${dogKey}_sit.png`);
+      this.load.image(`${dogKey}_walk1`, `sprites/dogs/${dogKey}/${dogKey}_walk1.png`);
+      this.load.image(`${dogKey}_walk2`, `sprites/dogs/${dogKey}/${dogKey}_walk2.png`);
+      this.load.image(`${dogKey}_walk3`, `sprites/dogs/${dogKey}/${dogKey}_walk3.png`);
+      this.load.image(`${dogKey}_run1`, `sprites/dogs/${dogKey}/${dogKey}_run1.png`);
+      this.load.image(`${dogKey}_run2`, `sprites/dogs/${dogKey}/${dogKey}_run2.png`);
+      this.load.image(`${dogKey}_jump_up`, `sprites/dogs/${dogKey}/${dogKey}_jump_up.png`);
+      this.load.image(`${dogKey}_jump_down`, `sprites/dogs/${dogKey}/${dogKey}_jump_down.png`);
+    });
   }
 
   buildIslandCollisionMask() {

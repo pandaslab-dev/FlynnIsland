@@ -508,6 +508,14 @@ function tryBoardAvailableCar(player, now) {
       return;
     }
 
+    if (
+      player.lastExitedCarId &&
+      car.id === player.lastExitedCarId &&
+      now < (player.lastExitedCarUntil || 0)
+    ) {
+      return;
+    }
+
     const definition = getCarDefinition(car.id);
     if (!definition) {
       return;
@@ -542,6 +550,8 @@ function tryBoardAvailableCar(player, now) {
   };
   player.exitCarRequested = false;
   bestCandidate.occupantId = player.id;
+  player.lastExitedCarId = null;
+  player.lastExitedCarUntil = 0;
   syncPlayerToCar(player, bestCandidate);
   return true;
 }
@@ -552,6 +562,7 @@ function releasePlayerFromCar(player, now) {
   }
 
   const car = cars[player.carId];
+  const previousCarId = player.carId;
   const definition = getCarDefinition(player.carId);
   if (!car || !definition) {
     player.carId = null;
@@ -562,26 +573,27 @@ function releasePlayerFromCar(player, now) {
   const forward = racingShared.getForwardVector(car.angle);
   const right = racingShared.getRightVector(car.angle);
   const exitDistance = definition.physics?.exitDistance || 120;
+  const sideExitDistance = definition.physics?.sideExitDistance || 72;
   const candidateOffsets = [
     {
-      x: (-forward.x * exitDistance) + (right.x * 48),
-      y: (-forward.y * exitDistance) + (right.y * 48)
+      x: (-forward.x * exitDistance) + (right.x * sideExitDistance),
+      y: (-forward.y * exitDistance) + (right.y * sideExitDistance)
     },
     {
-      x: (-forward.x * exitDistance) - (right.x * 48),
-      y: (-forward.y * exitDistance) - (right.y * 48)
+      x: (-forward.x * exitDistance) - (right.x * sideExitDistance),
+      y: (-forward.y * exitDistance) - (right.y * sideExitDistance)
     },
     {
-      x: right.x * exitDistance,
-      y: right.y * exitDistance
+      x: right.x * (exitDistance + 18),
+      y: right.y * (exitDistance + 18)
     },
     {
-      x: -right.x * exitDistance,
-      y: -right.y * exitDistance
+      x: -right.x * (exitDistance + 18),
+      y: -right.y * (exitDistance + 18)
     },
     {
-      x: -forward.x * (exitDistance * 0.8),
-      y: -forward.y * (exitDistance * 0.8)
+      x: -forward.x * (exitDistance * 1.15),
+      y: -forward.y * (exitDistance * 1.15)
     }
   ];
 
@@ -607,7 +619,9 @@ function releasePlayerFromCar(player, now) {
     steer: 0,
     boost: false
   };
-  player.reboardEnabledAt = now + 650;
+  player.reboardEnabledAt = now + 1100;
+  player.lastExitedCarId = previousCarId;
+  player.lastExitedCarUntil = now + 1600;
   player.vx = 0;
   player.vy = 0;
   player.animation = 'stand';
@@ -834,7 +848,9 @@ io.on('connection', (socket) => {
         boost: false
       },
       exitCarRequested: false,
-      reboardEnabledAt: 0
+      reboardEnabledAt: 0,
+      lastExitedCarId: null,
+      lastExitedCarUntil: 0
     };
   });
 

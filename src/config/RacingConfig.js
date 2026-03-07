@@ -48,7 +48,8 @@
             halfWidth: 38,
             collisionRadius: 70,
             entryRadius: 104,
-            exitDistance: 148
+            exitDistance: 184,
+            sideExitDistance: 84
           }),
           trails: Object.freeze({
             rearOffsetX: -62,
@@ -83,7 +84,8 @@
             halfWidth: 38,
             collisionRadius: 70,
             entryRadius: 104,
-            exitDistance: 148
+            exitDistance: 184,
+            sideExitDistance: 84
           }),
           trails: Object.freeze({
             rearOffsetX: -62,
