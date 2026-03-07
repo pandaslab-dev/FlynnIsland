@@ -776,6 +776,7 @@ class GameScene extends Phaser.Scene {
     }
 
     if (playerEntity.currentPose !== 'foot') {
+      playerEntity.sprite.setCrop();
       playerEntity.sprite.setRotation(0);
       playerEntity.sprite.setOrigin(0.5, 0.5);
       playerEntity.sprite.setScale(this.PLAYER_SCALE);
@@ -803,6 +804,10 @@ class GameScene extends Phaser.Scene {
 
     playerEntity.sprite.anims.stop();
     playerEntity.sprite.setTexture(`${playerEntity.dogKey}_sit`);
+    const seatedFrame = playerEntity.sprite.frame;
+    const seatedCropWidth = seatedFrame?.cutWidth || playerEntity.sprite.width || 0;
+    const seatedCropHeight = Math.floor((seatedFrame?.cutHeight || playerEntity.sprite.height || 0) * 0.7);
+    playerEntity.sprite.setCrop(0, 0, seatedCropWidth, seatedCropHeight);
     playerEntity.sprite.setOrigin(seatPose.originX, seatPose.originY);
     playerEntity.sprite.setScale(seatPose.scale);
     playerEntity.sprite.setRotation(seatPose.rotation);
