@@ -36,8 +36,8 @@
             originY: 0.82
           }),
           seat: Object.freeze({
-            offsetX: -30,
-            offsetY: -18,
+            offsetX: 20,
+            offsetY: 32,
             scale: 0.136,
             originX: 0.5,
             originY: 0.95,
@@ -72,8 +72,8 @@
             originY: 0.82
           }),
           seat: Object.freeze({
-            offsetX: -40,
-            offsetY: -12,
+            offsetX: 10,
+            offsetY: 38,
             scale: 0.136,
             originX: 0.5,
             originY: 0.95,
