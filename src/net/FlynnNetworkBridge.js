@@ -11,6 +11,7 @@ class FlynnNetworkBridge {
 
     this.connectedHandler = null;
     this.worldStateHandler = null;
+    this.uiMessageHandler = null;
   }
 
   connect(joinPayload) {
@@ -49,6 +50,12 @@ class FlynnNetworkBridge {
       }
     });
 
+    this.socket.on('ui:message', (payload) => {
+      if (typeof this.uiMessageHandler === 'function') {
+        this.uiMessageHandler(payload);
+      }
+    });
+
     return this.localPlayerId;
   }
 
@@ -58,6 +65,10 @@ class FlynnNetworkBridge {
 
   onWorldState(handler) {
     this.worldStateHandler = handler;
+  }
+
+  onUiMessage(handler) {
+    this.uiMessageHandler = handler;
   }
 
   sendInput(inputPayload) {
@@ -74,6 +85,14 @@ class FlynnNetworkBridge {
     }
 
     this.socket.emit('player:emote', emoji);
+  }
+
+  sendFetchAction(payload) {
+    if (!this.socket) {
+      return;
+    }
+
+    this.socket.emit('fetch:action', payload);
   }
 
   disconnect() {

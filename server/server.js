@@ -8,6 +8,8 @@ const { Server } = require('socket.io');
 
 const worldConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'IslandWorldConfig.js'));
 const racingConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'RacingConfig.js'));
+const fetchConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'FetchConfig.js'));
+const fetchShared = require(path.resolve(__dirname, '..', 'src', 'shared', 'FetchShared.js'));
 const racingShared = require(path.resolve(__dirname, '..', 'src', 'shared', 'RacingShared.js'));
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -71,6 +73,8 @@ const ALLOWED_ANIMATIONS = new Set(['stand', 'walk', 'run', 'jump', 'sit']);
 
 const players = {};
 const cars = createInitialCars();
+let fetchBall = null;
+let uiMessageSequence = 0;
 
 let islandMask = null;
 let racetrackMask = null;
@@ -235,6 +239,16 @@ function loadIslandMask() {
     `Island mask load failed at ${ISLAND_MASK_PATH}; movement will be blocked until mask loads.`
   );
   hasWarnedMissingIslandMask = false;
+
+  if (fetchBall && !fetchBall.holderId && !canBallOccupy(fetchBall.x, fetchBall.y)) {
+    const nearestBallPosition = findNearestBallPosition(fetchBall.x, fetchBall.y, 160, 6);
+    if (nearestBallPosition) {
+      fetchBall.x = nearestBallPosition.x;
+      fetchBall.y = nearestBallPosition.y;
+      fetchBall.vx = 0;
+      fetchBall.vy = 0;
+    }
+  }
 }
 
 function loadRacetrackMask() {
@@ -327,6 +341,21 @@ function canPlayerOccupy(worldX, worldY) {
   }
 
   return true;
+}
+
+function canBallOccupy(worldX, worldY) {
+  return fetchShared.canBallOccupyPosition(worldX, worldY, isBlockedAtWorldPoint, fetchConfig);
+}
+
+function findNearestBallPosition(startX, startY, maxRadius = 140, radiusStep = 6) {
+  return fetchShared.findNearestBallPosition(
+    startX,
+    startY,
+    isBlockedAtWorldPoint,
+    fetchConfig,
+    maxRadius,
+    radiusStep
+  );
 }
 
 function buildCollisionProbeRing(originX, originY, radius) {
@@ -435,6 +464,252 @@ function resolvePlayerPosition(currentX, currentY, requestedX, requestedY) {
   };
 }
 
+function createInitialFetchBall() {
+  const spawnPoint = fetchShared.findBallSpawnPosition({
+    config: fetchConfig,
+    worldBounds: WORLD_BOUNDS,
+    canOccupy: (candidateX, candidateY) => canBallOccupy(candidateX, candidateY),
+    anchorPoint: {
+      x: SPAWN_X,
+      y: SPAWN_Y
+    },
+    avoidPoints: [
+      {
+        x: SPAWN_X,
+        y: SPAWN_Y,
+        minDistance: fetchConfig.spawn.minDistanceFromSpawn
+      }
+    ],
+    fallbackPoint: {
+      x: SPAWN_X + 140,
+      y: SPAWN_Y - 90
+    }
+  });
+
+  return fetchShared.createBallState(spawnPoint, fetchConfig);
+}
+
+function emitUiMessage(text, durationMs = 2300) {
+  if (!text) {
+    return;
+  }
+
+  uiMessageSequence += 1;
+  io.emit('ui:message', {
+    id: `ui-${uiMessageSequence}`,
+    text,
+    durationMs
+  });
+}
+
+function syncFetchBallOwnership(holderId) {
+  Object.values(players).forEach((player) => {
+    player.heldBallId = player.id === holderId ? fetchConfig.ball.id : null;
+  });
+
+  if (fetchBall) {
+    fetchBall.holderId = holderId || null;
+  }
+}
+
+function serializeFetchBall(ball) {
+  if (!ball) {
+    return null;
+  }
+
+  return {
+    id: ball.id,
+    x: ball.x,
+    y: ball.y,
+    vx: ball.vx,
+    vy: ball.vy,
+    radius: ball.radius,
+    holderId: ball.holderId || null,
+    pickupEnabledAt: ball.pickupEnabledAt || 0,
+    lastThrowerId: ball.lastThrowerId || null,
+    lastThrowerName: ball.lastThrowerName || null,
+    lastThrownAt: ball.lastThrownAt || 0
+  };
+}
+
+function releaseFetchBallHeldByPlayer(player, now, options = {}) {
+  if (!player || !fetchBall || fetchBall.holderId !== player.id || player.heldBallId !== fetchConfig.ball.id) {
+    return false;
+  }
+
+  fetchShared.releaseBallFromHolder(fetchBall, player, now, options, fetchConfig);
+
+  const nearestBallPosition = findNearestBallPosition(fetchBall.x, fetchBall.y, 120, 6);
+  if (nearestBallPosition) {
+    fetchBall.x = nearestBallPosition.x;
+    fetchBall.y = nearestBallPosition.y;
+  }
+
+  syncFetchBallOwnership(null);
+  return true;
+}
+
+function pickupFetchBall(player, now) {
+  if (!player || !fetchBall || !fetchShared.isBallPickableByPlayer(fetchBall, player, now, fetchConfig)) {
+    return false;
+  }
+
+  const fetchedFromName = fetchBall.lastThrowerName;
+  fetchBall.pickupEnabledAt = 0;
+  fetchBall.lastThrownAt = 0;
+  fetchShared.placeBallAtHolder(fetchBall, player, fetchConfig);
+  syncFetchBallOwnership(player.id);
+
+  if (fetchedFromName) {
+    emitUiMessage(`${player.name} fetched a ball from ${fetchedFromName}!`);
+  }
+
+  fetchBall.lastThrowerId = null;
+  fetchBall.lastThrowerName = null;
+  return true;
+}
+
+function handleFetchAction(player, payload = {}, now) {
+  if (!player || !fetchBall) {
+    return false;
+  }
+
+  const actionType = typeof payload.type === 'string' ? payload.type : '';
+
+  if (actionType === 'pickup') {
+    return pickupFetchBall(player, now);
+  }
+
+  if (actionType === 'drop') {
+    return releaseFetchBallHeldByPlayer(player, now, { mode: 'drop' });
+  }
+
+  if (actionType === 'throw') {
+    const direction = fetchShared.normalizeVector(
+      Number.isFinite(payload.directionX) ? payload.directionX : 0,
+      Number.isFinite(payload.directionY) ? payload.directionY : 0,
+      player.flipX ? -1 : 1,
+      0
+    );
+
+    return releaseFetchBallHeldByPlayer(player, now, {
+      mode: 'throw',
+      directionX: direction.x,
+      directionY: direction.y
+    });
+  }
+
+  return false;
+}
+
+function resolveFetchBallPlayerCollision(ball, player) {
+  if (!ball || !player || player.carId || ball.holderId === player.id) {
+    return;
+  }
+
+  const colliderPosition = fetchShared.getPlayerBallColliderPosition(player, fetchConfig);
+  const collision = fetchShared.resolveBallCircleCollision(
+    ball,
+    {
+      x: colliderPosition.x,
+      y: colliderPosition.y,
+      radius: fetchConfig.physics.playerCollisionRadius,
+      vx: player.vx || 0,
+      vy: player.vy || 0
+    },
+    {
+      bounce: fetchConfig.physics.playerBounce,
+      velocityTransfer: fetchConfig.physics.playerVelocityTransfer
+    },
+    fetchConfig
+  );
+
+  if (!collision) {
+    return;
+  }
+
+  const playerSpeed = Math.hypot(player.vx || 0, player.vy || 0);
+  if (playerSpeed < fetchConfig.physics.nudgeSpeedThreshold) {
+    return;
+  }
+
+  const pushDirection = fetchShared.normalizeVector(
+    player.vx || 0,
+    player.vy || 0,
+    collision.normalX,
+    collision.normalY
+  );
+  const impulse = fetchConfig.physics.nudgeImpulse
+    + Math.min(playerSpeed * fetchConfig.physics.nudgeSpeedFactor, 120);
+
+  fetchShared.applyBallImpulse(
+    ball,
+    pushDirection.x * impulse,
+    pushDirection.y * impulse,
+    fetchConfig
+  );
+}
+
+function resolveFetchBallCarCollision(ball, car) {
+  if (!ball || !car) {
+    return;
+  }
+
+  const definition = getCarDefinition(car.id);
+  if (!definition) {
+    return;
+  }
+
+  fetchShared.resolveBallCircleCollision(
+    ball,
+    {
+      x: car.x,
+      y: car.y,
+      radius: (definition.physics?.collisionRadius || 70) + fetchConfig.physics.carCollisionPadding,
+      vx: car.vx || 0,
+      vy: car.vy || 0
+    },
+    {
+      bounce: fetchConfig.physics.carBounce,
+      velocityTransfer: fetchConfig.physics.carVelocityTransfer
+    },
+    fetchConfig
+  );
+}
+
+function updateFetchBall(dtSeconds, now) {
+  if (!fetchBall) {
+    return;
+  }
+
+  const holder = fetchBall.holderId ? players[fetchBall.holderId] : null;
+  if (fetchBall.holderId && !holder) {
+    fetchBall.holderId = null;
+    fetchBall.pickupEnabledAt = now + fetchConfig.physics.pickupCooldownMs;
+    syncFetchBallOwnership(null);
+  }
+
+  if (holder) {
+    fetchShared.placeBallAtHolder(fetchBall, holder, fetchConfig);
+    return;
+  }
+
+  fetchShared.advanceBall(fetchBall, dtSeconds, {
+    config: fetchConfig,
+    worldBounds: WORLD_BOUNDS,
+    canOccupy: (candidateX, candidateY) => canBallOccupy(candidateX, candidateY),
+    onStep: () => {
+      Object.values(cars).forEach((car) => {
+        resolveFetchBallCarCollision(fetchBall, car);
+      });
+
+      Object.values(players).forEach((player) => {
+        resolveFetchBallPlayerCollision(fetchBall, player);
+      });
+    }
+  });
+}
+
 function getCarDefinition(carId) {
   return CAR_DEFINITION_MAP.get(carId) || null;
 }
@@ -496,7 +771,7 @@ function syncPlayerToCar(player, car) {
 }
 
 function tryBoardAvailableCar(player, now) {
-  if (!player || player.carId || now < (player.reboardEnabledAt || 0)) {
+  if (!player || player.carId || player.heldBallId || now < (player.reboardEnabledAt || 0)) {
     return false;
   }
 
@@ -836,7 +1111,8 @@ function serializePlayer(player) {
     animation: player.carId ? 'sit' : player.animation,
     flipX: player.carId ? false : player.flipX,
     emote: player.emote,
-    carId: player.carId || null
+    carId: player.carId || null,
+    heldBallId: player.heldBallId || null
   };
 }
 
@@ -862,7 +1138,10 @@ function emitWorldState() {
 
   io.emit('world:state', {
     players: playerSnapshot,
-    cars: carSnapshot
+    cars: carSnapshot,
+    fetch: {
+      ball: serializeFetchBall(fetchBall)
+    }
   });
 }
 
@@ -878,6 +1157,7 @@ io.on('connection', (socket) => {
       y: spawnPoint.y,
       animation: 'stand',
       flipX: false,
+      heldBallId: null,
       vx: 0,
       vy: 0,
       lastInputAt: Date.now(),
@@ -990,10 +1270,23 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('fetch:action', (payload = {}) => {
+    const player = players[socket.id];
+    if (!player) {
+      return;
+    }
+
+    handleFetchAction(player, payload, Date.now());
+  });
+
   socket.on('disconnect', () => {
     const player = players[socket.id];
     if (player?.carId && cars[player.carId]) {
       cars[player.carId].occupantId = null;
+    }
+
+    if (player?.heldBallId === fetchConfig.ball.id) {
+      releaseFetchBallHeldByPlayer(player, Date.now(), { mode: 'drop' });
     }
 
     delete players[socket.id];
@@ -1005,6 +1298,7 @@ setInterval(() => {
   const dtSeconds = TICK_RATE_MS / 1000;
 
   updateCars(dtSeconds, now);
+  updateFetchBall(dtSeconds, now);
 
   Object.values(players).forEach((player) => {
     if (!player.carId) {
@@ -1023,6 +1317,7 @@ setInterval(() => {
 
 loadIslandMask();
 loadRacetrackMask();
+fetchBall = createInitialFetchBall();
 
 fs.watchFile(ISLAND_MASK_PATH, { interval: 1000 }, (current, previous) => {
   if (current.mtimeMs === previous.mtimeMs) {

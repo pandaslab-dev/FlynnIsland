@@ -46,6 +46,59 @@ const FALLBACK_RACING_CONFIG = Object.freeze({
   })
 });
 
+const FALLBACK_FETCH_CONFIG = Object.freeze({
+  ball: Object.freeze({
+    id: 'island-tennis-ball',
+    textureKey: 'tennisball',
+    imagePath: 'misc_assets/tennisball.png',
+    requestPath: 'misc_assets/tennisball.png',
+    displayScale: 0.0225,
+    hudScale: 0.0135,
+    radius: 22,
+    holdOffsetX: 48,
+    holdOffsetY: -6,
+    dropOffsetY: 12
+  }),
+  interaction: Object.freeze({
+    pickupRadius: 88,
+    promptRadius: 88
+  }),
+  spawn: Object.freeze({
+    attempts: 84,
+    margin: 40,
+    minDistanceFromSpawn: 150,
+    anchorRadius: 280,
+    searchRadius: 240,
+    searchStep: 10
+  }),
+  physics: Object.freeze({
+    throwSpeed: 760,
+    rollingDrag: 340,
+    maxSpeed: 920,
+    minSpeed: 6,
+    wallBounce: 0.74,
+    carBounce: 0.88,
+    playerBounce: 0.54,
+    carVelocityTransfer: 0.18,
+    playerVelocityTransfer: 0.08,
+    nudgeImpulse: 210,
+    nudgeSpeedThreshold: 32,
+    nudgeSpeedFactor: 0.12,
+    playerCollisionRadius: 34,
+    playerCollisionOffsetY: 34,
+    carCollisionPadding: 10,
+    sweepStep: 8,
+    maxStepDistance: 14,
+    pickupCooldownMs: 180
+  }),
+  throwDirections: Object.freeze([
+    Object.freeze({ id: 'up', label: 'Up', emoji: '⬆️', x: 0, y: -1 }),
+    Object.freeze({ id: 'right', label: 'Right', emoji: '➡️', x: 1, y: 0 }),
+    Object.freeze({ id: 'down', label: 'Down', emoji: '⬇️', x: 0, y: 1 }),
+    Object.freeze({ id: 'left', label: 'Left', emoji: '⬅️', x: -1, y: 0 })
+  ])
+});
+
 function getIslandWorldConfig() {
   if (window.FlynnIslandWorldConfig && window.FlynnIslandWorldConfig.worldBounds) {
     return window.FlynnIslandWorldConfig;
@@ -70,6 +123,22 @@ function getRacingShared() {
   return null;
 }
 
+function getFetchConfig() {
+  if (window.FlynnFetchConfig && window.FlynnFetchConfig.ball) {
+    return window.FlynnFetchConfig;
+  }
+
+  return FALLBACK_FETCH_CONFIG;
+}
+
+function getFetchShared() {
+  if (window.FlynnFetchShared) {
+    return window.FlynnFetchShared;
+  }
+
+  return null;
+}
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -81,6 +150,9 @@ class GameScene extends Phaser.Scene {
     this.keys = null;
     this.spaceKey = null;
     this.shiftKey = null;
+    this.interactKey = null;
+    this.dropKey = null;
+    this.escapeKey = null;
 
     this.isJumping = false;
     this.jumpTween = null;
@@ -94,6 +166,8 @@ class GameScene extends Phaser.Scene {
     this.PLAYER_TORSO_COLLISION_RADIUS = 22;
     this.PLAYER_TORSO_COLLISION_OFFSET_Y = 38;
     this.COLLISION_SWEEP_STEP = 4;
+    this.UI_DEPTH = 20000;
+    this.UI_OVERLAY_DEPTH = 21000;
     this.hasWarnedMissingIslandMask = false;
 
     this.emoteKeys = null;
@@ -137,6 +211,8 @@ class GameScene extends Phaser.Scene {
     this.worldConfig = getIslandWorldConfig();
     this.racingConfig = getRacingConfig();
     this.racingShared = getRacingShared();
+    this.fetchConfig = getFetchConfig();
+    this.fetchShared = getFetchShared();
     this.carDefinitions = Array.isArray(this.racingConfig.cars) ? this.racingConfig.cars : [];
     this.carDefinitionMap = new Map(this.carDefinitions.map((definition) => [definition.id, definition]));
     this.spawnPoint = {
@@ -159,6 +235,17 @@ class GameScene extends Phaser.Scene {
     this.tireTrackSegments = [];
     this.carExitHintText = null;
     this.currentControlMode = 'foot';
+    this.fetchBall = null;
+    this.fetchPromptUi = null;
+    this.fetchHudUi = null;
+    this.throwHudUi = null;
+    this.throwHudOpen = false;
+    this.throwHudBallTween = null;
+    this.fetchUiPointerHandler = null;
+    this.topMessageUi = null;
+    this.topMessageQueue = [];
+    this.activeTopMessageTween = null;
+    this.hasReceivedNetworkWorldState = false;
 
     this.playerData = {
       name: 'Player',
@@ -186,7 +273,8 @@ class GameScene extends Phaser.Scene {
         this,
         this.worldConfig,
         this.racingConfig,
-        this.DOG_KEYS
+        this.DOG_KEYS,
+        this.fetchConfig
       );
       return;
     }
@@ -207,6 +295,11 @@ class GameScene extends Phaser.Scene {
         definition.requestPath || definition.imagePath
       );
     });
+
+    this.load.image(
+      this.fetchConfig.ball.textureKey,
+      this.fetchConfig.ball.requestPath || this.fetchConfig.ball.imagePath
+    );
   }
 
   create() {
@@ -261,6 +354,9 @@ class GameScene extends Phaser.Scene {
     this.keys = this.input.keyboard.addKeys('W,A,S,D');
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.shiftKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+    this.interactKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.dropKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this.escapeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
 
     this.emoteKeys = this.input.keyboard.addKeys({
       one: Phaser.Input.Keyboard.KeyCodes.ONE,
@@ -273,6 +369,7 @@ class GameScene extends Phaser.Scene {
 
     this.createEmoteButtons();
     this.createMobileControls();
+    this.createFetchSystems();
     this.updateControlModeUi();
     this.updateCarExitHintPosition();
 
@@ -514,6 +611,16 @@ class GameScene extends Phaser.Scene {
       this.applyWorldState(worldState);
     });
 
+    if (typeof this.network.onUiMessage === 'function') {
+      this.network.onUiMessage((payload) => {
+        if (payload?.text) {
+          this.queueTopMessage(payload.text, {
+            durationMs: payload.durationMs
+          });
+        }
+      });
+    }
+
     this.localPlayerId = this.network.connect({
       id: this.localPlayerId,
       name: this.playerData.name,
@@ -528,6 +635,7 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
+    const previousLocalPlayerId = this.localPlayerId;
     const currentLocalPlayer = this.players[this.localPlayerId];
     if (!currentLocalPlayer) {
       this.localPlayerId = nextLocalPlayerId;
@@ -541,6 +649,11 @@ class GameScene extends Phaser.Scene {
     currentLocalPlayer.isLocal = true;
 
     this.localPlayerId = nextLocalPlayerId;
+
+    if (this.fetchBall?.state?.holderId === previousLocalPlayerId) {
+      this.fetchBall.state.holderId = nextLocalPlayerId;
+      this.syncHeldBallOwnershipFlags(nextLocalPlayerId);
+    }
   }
 
   normalizeDogKey(dogType) {
@@ -625,6 +738,10 @@ class GameScene extends Phaser.Scene {
         targetX: initialX,
         targetY: initialY,
         targetAngle: initialAngle,
+        vx: Number.isFinite(snapshot.vx) ? snapshot.vx : 0,
+        vy: Number.isFinite(snapshot.vy) ? snapshot.vy : 0,
+        targetVx: Number.isFinite(snapshot.vx) ? snapshot.vx : 0,
+        targetVy: Number.isFinite(snapshot.vy) ? snapshot.vy : 0,
         speed: snapshot.speed || 0,
         targetSpeed: snapshot.speed || 0,
         turnRate: snapshot.turnRate || 0,
@@ -645,6 +762,8 @@ class GameScene extends Phaser.Scene {
     carEntity.targetAngle = typeof snapshot.angle === 'number'
       ? this.getCarRenderAngle(snapshot.angle)
       : carEntity.targetAngle;
+    carEntity.targetVx = Number.isFinite(snapshot.vx) ? snapshot.vx : carEntity.targetVx;
+    carEntity.targetVy = Number.isFinite(snapshot.vy) ? snapshot.vy : carEntity.targetVy;
     carEntity.targetSpeed = Number.isFinite(snapshot.speed) ? snapshot.speed : carEntity.targetSpeed;
     carEntity.targetTurnRate = Number.isFinite(snapshot.turnRate) ? snapshot.turnRate : carEntity.targetTurnRate;
     carEntity.occupantId = snapshot.occupantId || null;
@@ -654,6 +773,8 @@ class GameScene extends Phaser.Scene {
     if (snapToPosition) {
       carEntity.sprite.setPosition(carEntity.targetX, carEntity.targetY);
       carEntity.sprite.setRotation(carEntity.targetAngle);
+      carEntity.vx = carEntity.targetVx;
+      carEntity.vy = carEntity.targetVy;
       carEntity.speed = carEntity.targetSpeed;
       carEntity.turnRate = carEntity.targetTurnRate;
       this.applyCarTransform(carEntity, true);
@@ -691,7 +812,7 @@ class GameScene extends Phaser.Scene {
     });
     this.carExitHintText.setOrigin(0.5, 0.5);
     this.carExitHintText.setScrollFactor(0);
-    this.carExitHintText.setDepth(3200);
+    this.carExitHintText.setDepth(this.UI_DEPTH + 20);
     this.carExitHintText.setAlpha(0);
     this.updateCarExitHintPosition();
   }
@@ -1005,8 +1126,11 @@ class GameScene extends Phaser.Scene {
         serverAnimation: 'stand',
         serverX: sprite.x,
         serverY: sprite.y,
+        vx: 0,
+        vy: 0,
         carId: null,
-        currentPose: 'foot'
+        currentPose: 'foot',
+        heldBallId: null
       };
 
       this.players[playerId] = playerEntity;
@@ -1028,6 +1152,7 @@ class GameScene extends Phaser.Scene {
     }
 
     playerEntity.isLocal = Boolean(playerData.isLocal);
+    playerEntity.heldBallId = playerData.heldBallId || null;
     playerEntity.dogTypeText.setText(dogLabel);
 
     if (typeof playerData.flipX === 'boolean') {
@@ -1076,6 +1201,8 @@ class GameScene extends Phaser.Scene {
   }
 
   applyWorldState(worldState) {
+    const wasUsingLocalFetchAuthority = !this.hasReceivedNetworkWorldState;
+    this.hasReceivedNetworkWorldState = true;
     const playersSnapshot = Array.isArray(worldState)
       ? worldState
       : Array.isArray(worldState?.players)
@@ -1084,6 +1211,7 @@ class GameScene extends Phaser.Scene {
     const carsSnapshot = Array.isArray(worldState?.cars)
       ? worldState.cars
       : [];
+    const ballSnapshot = worldState?.fetch?.ball || worldState?.ball || null;
 
     const activeIds = new Set();
     const activeCarIds = new Set();
@@ -1142,6 +1270,14 @@ class GameScene extends Phaser.Scene {
         this.removePlayer(playerId);
       }
     });
+
+    if (ballSnapshot) {
+      this.applyFetchBallSnapshot(ballSnapshot, wasUsingLocalFetchAuthority);
+    } else if (this.fetchBall) {
+      this.fetchBall.state = null;
+      this.syncHeldBallOwnershipFlags(null);
+      this.updateFetchUi();
+    }
   }
 
   getLocalPlayer() {
@@ -1208,6 +1344,8 @@ class GameScene extends Phaser.Scene {
 
       carEntity.speed = Phaser.Math.Linear(carEntity.speed || 0, carEntity.targetSpeed || 0, smoothing);
       carEntity.turnRate = Phaser.Math.Linear(carEntity.turnRate || 0, carEntity.targetTurnRate || 0, smoothing);
+      carEntity.vx = Phaser.Math.Linear(carEntity.vx || 0, carEntity.targetVx || 0, smoothing);
+      carEntity.vy = Phaser.Math.Linear(carEntity.vy || 0, carEntity.targetVy || 0, smoothing);
       this.applyCarTransform(carEntity);
     });
   }
@@ -1501,12 +1639,15 @@ class GameScene extends Phaser.Scene {
     this.updateCameraZoom();
     this.createEmoteButtons();
     this.updateCarExitHintPosition();
+    this.layoutTopMessageUi();
+    this.layoutFetchUi();
 
     if (this.shouldRebuildMobileControls()) {
       this.createMobileControls();
     }
 
     this.updateControlModeUi();
+    this.updateFetchUi();
   }
 
   shouldRebuildMobileControls() {
@@ -1567,7 +1708,7 @@ class GameScene extends Phaser.Scene {
         0.8
       );
       buttonBg.setStrokeStyle(3, 0xffffff, 0.6);
-      buttonBg.setDepth(3000);
+      buttonBg.setDepth(this.UI_DEPTH + 30);
 
       const emojiText = this.add.text(
         xPosition,
@@ -1581,7 +1722,7 @@ class GameScene extends Phaser.Scene {
         }
       );
       emojiText.setOrigin(0.5, 0.5);
-      emojiText.setDepth(3001);
+      emojiText.setDepth(this.UI_DEPTH + 31);
 
       buttonBg.setInteractive({ useHandCursor: true });
 
@@ -1669,11 +1810,11 @@ class GameScene extends Phaser.Scene {
     this.joystickBase = this.add.circle(joystickX, joystickY, baseRadius, 0x222222, 0.35);
     this.joystickBase.setStrokeStyle(3, 0xffffff, 0.35);
     this.joystickBase.setScrollFactor(0);
-    this.joystickBase.setDepth(1000);
+    this.joystickBase.setDepth(this.UI_DEPTH + 10);
 
     this.joystickThumb = this.add.circle(joystickX, joystickY, thumbRadius, 0xffffff, 0.55);
     this.joystickThumb.setScrollFactor(0);
-    this.joystickThumb.setDepth(1001);
+    this.joystickThumb.setDepth(this.UI_DEPTH + 11);
 
     const jumpX = viewportWidth - sideX;
     const jumpY = controlY;
@@ -1683,7 +1824,7 @@ class GameScene extends Phaser.Scene {
     this.jumpButton = this.add.circle(jumpX, jumpY, jumpRadius, 0x4CAF50, 0.5);
     this.jumpButton.setStrokeStyle(3, 0xffffff, 0.6);
     this.jumpButton.setScrollFactor(0);
-    this.jumpButton.setDepth(1000);
+    this.jumpButton.setDepth(this.UI_DEPTH + 10);
     this.jumpButton.setInteractive({ useHandCursor: false });
 
     const jumpLabel = this.add.text(jumpX, jumpY, 'JUMP', {
@@ -1695,14 +1836,14 @@ class GameScene extends Phaser.Scene {
     });
     jumpLabel.setOrigin(0.5, 0.5);
     jumpLabel.setScrollFactor(0);
-    jumpLabel.setDepth(1001);
+    jumpLabel.setDepth(this.UI_DEPTH + 11);
     this.jumpButtonLabel = jumpLabel;
     this.mobileControlElements.push(this.joystickBase, this.joystickThumb, this.jumpButton, jumpLabel);
 
     this.sprintButton = this.add.circle(sprintX, sprintY, sprintRadius, 0x0f766e, 0.55);
     this.sprintButton.setStrokeStyle(3, 0xffffff, 0.6);
     this.sprintButton.setScrollFactor(0);
-    this.sprintButton.setDepth(1000);
+    this.sprintButton.setDepth(this.UI_DEPTH + 10);
     this.sprintButton.setInteractive({ useHandCursor: false });
 
     const sprintLabel = this.add.text(sprintX, sprintY, 'RUN', {
@@ -1714,7 +1855,7 @@ class GameScene extends Phaser.Scene {
     });
     sprintLabel.setOrigin(0.5, 0.5);
     sprintLabel.setScrollFactor(0);
-    sprintLabel.setDepth(1001);
+    sprintLabel.setDepth(this.UI_DEPTH + 11);
     this.sprintButtonLabel = sprintLabel;
     this.mobileControlElements.push(this.sprintButton, sprintLabel);
 
@@ -1754,6 +1895,10 @@ class GameScene extends Phaser.Scene {
 
     this.mobileControlHandlers = {
       pointerdown: (pointer) => {
+        if (pointer.__fetchUiConsumed || this.isPointerOverTopFetchUi(pointer) || this.tryHandleFetchUiPointer(pointer)) {
+          return;
+        }
+
         if (this.joystickPointer) {
           return;
         }
@@ -1909,6 +2054,1451 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  createFetchSystems() {
+    this.createTopMessageSystem();
+    this.createFetchBallEntity();
+    this.createFetchUi();
+    this.bindFetchUiPointerHandler();
+    this.initializeOfflineFetchBallIfNeeded();
+    this.updateFetchUi();
+  }
+
+  normalizeUiDimension(value, minimum = 2) {
+    const rounded = Math.max(minimum, Math.round(value));
+    return rounded % 2 === 0 ? rounded : rounded + 1;
+  }
+
+  createUiRect(width, height, fillColor, fillAlpha, options = {}) {
+    const rect = this.add.graphics();
+    rect.setScrollFactor(0);
+    rect.__uiStyle = {
+      fillColor,
+      fillAlpha,
+      strokeThickness: options.strokeThickness || 0,
+      strokeColor: options.strokeColor || 0xffffff,
+      strokeAlpha: options.strokeAlpha ?? 1
+    };
+    this.resizeUiRect(rect, width, height);
+    return rect;
+  }
+
+  resizeUiRect(rect, width, height) {
+    if (!rect) {
+      return;
+    }
+
+    const normalizedWidth = this.normalizeUiDimension(width);
+    const normalizedHeight = this.normalizeUiDimension(height);
+    const style = rect.__uiStyle || {};
+
+    rect.clear();
+
+    if ((style.fillAlpha ?? 0) > 0) {
+      rect.fillStyle(style.fillColor || 0xffffff, style.fillAlpha);
+      rect.fillRect(
+        -normalizedWidth / 2,
+        -normalizedHeight / 2,
+        normalizedWidth,
+        normalizedHeight
+      );
+    }
+
+    if ((style.strokeThickness || 0) > 0) {
+      rect.lineStyle(style.strokeThickness, style.strokeColor || 0xffffff, style.strokeAlpha ?? 1);
+      rect.strokeRect(
+        -normalizedWidth / 2,
+        -normalizedHeight / 2,
+        normalizedWidth,
+        normalizedHeight
+      );
+    }
+
+    rect.uiWidth = normalizedWidth;
+    rect.uiHeight = normalizedHeight;
+  }
+
+  createUiEllipse(width, height, fillColor, fillAlpha, options = {}) {
+    const ellipse = this.add.graphics();
+    ellipse.setScrollFactor(0);
+    ellipse.__uiStyle = {
+      fillColor,
+      fillAlpha,
+      strokeThickness: options.strokeThickness || 0,
+      strokeColor: options.strokeColor || 0xffffff,
+      strokeAlpha: options.strokeAlpha ?? 1
+    };
+    this.resizeUiEllipse(ellipse, width, height);
+    return ellipse;
+  }
+
+  resizeUiEllipse(ellipse, width, height) {
+    if (!ellipse) {
+      return;
+    }
+
+    const normalizedWidth = this.normalizeUiDimension(width);
+    const normalizedHeight = this.normalizeUiDimension(height);
+    const style = ellipse.__uiStyle || {};
+
+    ellipse.clear();
+
+    if ((style.fillAlpha ?? 0) > 0) {
+      ellipse.fillStyle(style.fillColor || 0xffffff, style.fillAlpha);
+      ellipse.fillEllipse(0, 0, normalizedWidth, normalizedHeight);
+    }
+
+    if ((style.strokeThickness || 0) > 0) {
+      ellipse.lineStyle(style.strokeThickness, style.strokeColor || 0xffffff, style.strokeAlpha ?? 1);
+      ellipse.strokeEllipse(0, 0, normalizedWidth, normalizedHeight);
+    }
+
+    ellipse.uiWidth = normalizedWidth;
+    ellipse.uiHeight = normalizedHeight;
+  }
+
+  createTopMessageSystem() {
+    if (this.topMessageUi?.container) {
+      this.topMessageUi.container.destroy();
+    }
+
+    const container = this.add.container(0, 0);
+    container.setScrollFactor(0);
+    container.setDepth(this.UI_OVERLAY_DEPTH + 20);
+    container.setVisible(false);
+
+    const background = this.createUiRect(280, 52, 0x111827, 0.88, {
+      strokeThickness: 3,
+      strokeColor: 0xf8fafc,
+      strokeAlpha: 0.45
+    });
+
+    const text = this.add.text(0, 0, '', {
+      fontSize: '24px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 5,
+      align: 'center'
+    });
+    text.setOrigin(0.5, 0.5);
+
+    container.add([background, text]);
+
+    this.topMessageUi = {
+      container,
+      background,
+      text
+    };
+
+    this.layoutTopMessageUi();
+  }
+
+  getTopMessageTargetY() {
+    if (this.fetchHudUi?.container?.visible) {
+      return this.fetchHudUi.container.y + ((this.fetchHudUi.panel.uiHeight || 78) / 2) + 34;
+    }
+
+    if (this.fetchPromptUi?.container?.visible) {
+      return this.fetchPromptUi.container.y + (this.fetchPromptUi.height / 2) + 28;
+    }
+
+    return this.sys.game.device.input.touch ? 42 : 34;
+  }
+
+  layoutTopMessageUi() {
+    if (!this.topMessageUi?.container) {
+      return;
+    }
+
+    this.topMessageUi.container.setPosition(this.scale.width / 2, this.getTopMessageTargetY());
+  }
+
+  queueTopMessage(text, options = {}) {
+    if (!text || !this.topMessageUi) {
+      return;
+    }
+
+    this.topMessageQueue.push({
+      text: String(text),
+      durationMs: Number.isFinite(options.durationMs) ? options.durationMs : 2300
+    });
+
+    if (this.topMessageUi.container.visible || this.activeTopMessageTween) {
+      return;
+    }
+
+    this.showNextTopMessage();
+  }
+
+  showNextTopMessage() {
+    if (!this.topMessageUi || !this.topMessageQueue.length) {
+      return;
+    }
+
+    const nextMessage = this.topMessageQueue.shift();
+    const targetY = this.getTopMessageTargetY();
+    const container = this.topMessageUi.container;
+    const background = this.topMessageUi.background;
+    const text = this.topMessageUi.text;
+
+    text.setText(nextMessage.text);
+    text.setWordWrapWidth(Math.max(220, this.scale.width - 80), true);
+    this.resizeUiRect(
+      background,
+      Math.min(this.scale.width - 32, Math.max(220, text.width + 54)),
+      Math.max(48, text.height + 20)
+    );
+    this.layoutTopMessageUi();
+
+    this.tweens.killTweensOf(container);
+    container.setVisible(true);
+    container.setAlpha(0);
+    container.setScale(0.94);
+    container.setY(targetY - 12);
+
+    this.activeTopMessageTween = this.tweens.add({
+      targets: container,
+      alpha: 1,
+      scaleX: 1,
+      scaleY: 1,
+      y: targetY,
+      duration: 180,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(nextMessage.durationMs, () => {
+          this.activeTopMessageTween = this.tweens.add({
+            targets: container,
+            alpha: 0,
+            y: targetY - 16,
+            duration: 420,
+            ease: 'Power2',
+            onComplete: () => {
+              container.setVisible(false);
+              this.activeTopMessageTween = null;
+              this.showNextTopMessage();
+            }
+          });
+        });
+      }
+    });
+  }
+
+  createUiButton(width, height, label, options = {}) {
+    const container = this.add.container(0, 0);
+    container.setScrollFactor(0);
+    container.setDepth(options.depth || (this.UI_DEPTH + 40));
+
+    const background = this.add.rectangle(0, 0, width, height, options.fillColor || 0x243042, options.alpha || 0.95);
+    background.setStrokeStyle(
+      options.strokeThickness || 3,
+      options.strokeColor || 0xffffff,
+      options.strokeAlpha || 0.5
+    );
+
+    const text = this.add.text(options.labelX || 0, options.labelY || 0, label, {
+      fontSize: options.fontSize || '24px',
+      fontFamily: 'Arial, sans-serif',
+      color: options.textColor || '#ffffff',
+      stroke: options.textStroke || '#000000',
+      strokeThickness: options.textStrokeThickness || 4,
+      align: 'center'
+    });
+    text.setOrigin(0.5, 0.5);
+
+    const hitArea = this.add.rectangle(0, 0, width, height, 0xffffff, 0.001);
+    container.add([background, text, hitArea]);
+    const trigger = () => {
+      const now = this.time.now;
+      if ((trigger.lastTriggeredAt || 0) && (now - trigger.lastTriggeredAt) < 80) {
+        return;
+      }
+
+      trigger.lastTriggeredAt = now;
+      background.setFillStyle(options.pressColor || options.hoverColor || options.fillColor || 0x243042, options.alpha || 0.95);
+      this.tweens.add({
+        targets: container,
+        scaleX: 0.94,
+        scaleY: 0.94,
+        duration: 70,
+        yoyo: true,
+        ease: 'Power2'
+      });
+
+      if (typeof options.onClick === 'function') {
+        options.onClick();
+      }
+    };
+
+    if (typeof options.onClick === 'function') {
+      hitArea.setInteractive({ useHandCursor: true });
+
+      hitArea.on('pointerover', () => {
+        background.setFillStyle(options.hoverColor || options.fillColor || 0x243042, options.alpha || 0.95);
+        this.tweens.add({
+          targets: container,
+          scaleX: 1.05,
+          scaleY: 1.05,
+          duration: 100,
+          ease: 'Power2'
+        });
+      });
+
+      hitArea.on('pointerout', () => {
+        background.setFillStyle(options.fillColor || 0x243042, options.alpha || 0.95);
+        this.tweens.add({
+          targets: container,
+          scaleX: 1,
+          scaleY: 1,
+          duration: 100,
+          ease: 'Power2'
+        });
+      });
+
+      hitArea.on('pointerdown', () => {
+        trigger();
+      });
+
+      hitArea.on('pointerup', () => {
+        background.setFillStyle(options.fillColor || 0x243042, options.alpha || 0.95);
+      });
+
+      hitArea.on('pointerupoutside', () => {
+        background.setFillStyle(options.fillColor || 0x243042, options.alpha || 0.95);
+      });
+    }
+
+    return {
+      container,
+      background,
+      text,
+      hitArea,
+      actionZone: null,
+      trigger,
+      width,
+      height
+    };
+  }
+
+  createScreenButtonZone(button) {
+    if (!button) {
+      return null;
+    }
+
+    const zone = this.add.zone(0, 0, button.width, button.height);
+    zone.setOrigin(0.5, 0.5);
+    zone.setScrollFactor(0);
+    zone.setDepth(this.UI_OVERLAY_DEPTH + 40);
+    zone.setInteractive({ useHandCursor: true });
+    zone.setActive(false);
+    zone.setVisible(false);
+
+    zone.on('pointerdown', (pointer, localX, localY, event) => {
+      if (event?.stopPropagation) {
+        event.stopPropagation();
+      }
+
+      pointer.__fetchUiConsumed = true;
+      this.time.delayedCall(0, () => {
+        pointer.__fetchUiConsumed = false;
+      });
+      button.trigger();
+    });
+
+    zone.on('pointerup', (pointer, localX, localY, event) => {
+      if (event?.stopPropagation) {
+        event.stopPropagation();
+      }
+    });
+
+    zone.on('pointerupoutside', (pointer, localX, localY, event) => {
+      if (event?.stopPropagation) {
+        event.stopPropagation();
+      }
+    });
+
+    button.actionZone = zone;
+    return zone;
+  }
+
+  destroyScreenButtonZone(button) {
+    if (button?.actionZone) {
+      button.actionZone.destroy();
+      button.actionZone = null;
+    }
+  }
+
+  setScreenButtonPosition(button, x, y) {
+    if (!button?.actionZone) {
+      return;
+    }
+
+    button.actionZone.setPosition(x, y);
+  }
+
+  syncScreenButtonVisibility(button, isVisible) {
+    if (!button?.actionZone) {
+      return;
+    }
+
+    button.actionZone.setActive(isVisible);
+    button.actionZone.setVisible(isVisible);
+  }
+
+  isPointerInsideZone(pointer, zone) {
+    if (!pointer || !zone?.active) {
+      return false;
+    }
+
+    const halfWidth = zone.width / 2;
+    const halfHeight = zone.height / 2;
+
+    return (
+      pointer.x >= (zone.x - halfWidth) &&
+      pointer.x <= (zone.x + halfWidth) &&
+      pointer.y >= (zone.y - halfHeight) &&
+      pointer.y <= (zone.y + halfHeight)
+    );
+  }
+
+  isPointerOverTopFetchUi(pointer) {
+    return Boolean(
+      (!this.throwHudOpen && this.fetchPromptUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.fetchPromptUi))
+      || (!this.throwHudOpen && this.fetchHudUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.fetchHudUi?.dropButton, this.fetchHudUi.container))
+      || (!this.throwHudOpen && this.fetchHudUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.fetchHudUi?.throwButton, this.fetchHudUi.container))
+    );
+  }
+
+  bindFetchUiPointerHandler() {
+    if (this.fetchUiPointerHandler) {
+      this.input.off('pointerdown', this.fetchUiPointerHandler);
+    }
+
+    this.fetchUiPointerHandler = (pointer) => {
+      if (this.tryHandleFetchUiPointer(pointer)) {
+        pointer.__fetchUiConsumed = true;
+        this.time.delayedCall(0, () => {
+          pointer.__fetchUiConsumed = false;
+        });
+      }
+    };
+
+    this.input.on('pointerdown', this.fetchUiPointerHandler);
+  }
+
+  getUiButtonScreenPosition(button, parentContainer = null) {
+    if (!button?.container) {
+      return { x: 0, y: 0 };
+    }
+
+    return {
+      x: (parentContainer?.x || 0) + button.container.x,
+      y: (parentContainer?.y || 0) + button.container.y
+    };
+  }
+
+  isPointerInsideUiButton(pointer, button, parentContainer = null) {
+    if (!pointer || !button?.container || !button.container.visible) {
+      return false;
+    }
+
+    const position = this.getUiButtonScreenPosition(button, parentContainer);
+    const scaleX = Math.abs(button.container.scaleX || 1);
+    const scaleY = Math.abs(button.container.scaleY || 1);
+    const halfWidth = (button.width * scaleX) / 2;
+    const halfHeight = (button.height * scaleY) / 2;
+
+    return (
+      pointer.x >= (position.x - halfWidth) &&
+      pointer.x <= (position.x + halfWidth) &&
+      pointer.y >= (position.y - halfHeight) &&
+      pointer.y <= (position.y + halfHeight)
+    );
+  }
+
+  tryHandleFetchUiPointer(pointer) {
+    if (!pointer) {
+      return false;
+    }
+
+    if (!this.throwHudOpen) {
+      if (this.fetchPromptUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.fetchPromptUi)) {
+        this.fetchPromptUi.trigger();
+        return true;
+      }
+
+      if (this.fetchHudUi?.container?.visible) {
+        if (this.isPointerInsideUiButton(pointer, this.fetchHudUi.dropButton, this.fetchHudUi.container)) {
+          this.fetchHudUi.dropButton.trigger();
+          return true;
+        }
+
+        if (this.isPointerInsideUiButton(pointer, this.fetchHudUi.throwButton, this.fetchHudUi.container)) {
+          this.fetchHudUi.throwButton.trigger();
+          return true;
+        }
+      }
+    }
+
+    if (this.throwHudOpen && this.throwHudUi?.container?.visible) {
+      for (const entry of this.throwHudUi.directionButtons) {
+        if (this.isPointerInsideUiButton(pointer, entry.button, this.throwHudUi.container)) {
+          entry.button.trigger();
+          return true;
+        }
+      }
+
+      if (this.isPointerInsideUiButton(pointer, this.throwHudUi.cancelButton, this.throwHudUi.container)) {
+        this.throwHudUi.cancelButton.trigger();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  createFetchBallEntity() {
+    if (this.fetchBall?.sprite) {
+      this.fetchBall.sprite.destroy();
+    }
+    if (this.fetchBall?.shadow) {
+      this.fetchBall.shadow.destroy();
+    }
+
+    const shadow = this.add.ellipse(0, 0, 42, 18, 0x000000, 0.18);
+    shadow.setVisible(false);
+
+    const sprite = this.add.image(0, 0, this.fetchConfig.ball.textureKey);
+    sprite.setScale(this.fetchConfig.ball.displayScale);
+    sprite.setVisible(false);
+
+    this.fetchBall = {
+      sprite,
+      shadow,
+      state: null,
+      renderX: 0,
+      renderY: 0,
+      targetX: 0,
+      targetY: 0
+    };
+  }
+
+  createFetchUi() {
+    this.destroyScreenButtonZone(this.fetchPromptUi);
+    this.destroyScreenButtonZone(this.fetchHudUi?.dropButton);
+    this.destroyScreenButtonZone(this.fetchHudUi?.throwButton);
+
+    if (this.fetchPromptUi?.container) {
+      this.fetchPromptUi.container.destroy();
+    }
+    if (this.fetchHudUi?.container) {
+      this.fetchHudUi.container.destroy();
+    }
+    if (this.throwHudUi?.container) {
+      this.throwHudUi.container.destroy();
+    }
+    if (this.throwHudBallTween) {
+      this.throwHudBallTween.stop();
+      this.throwHudBallTween = null;
+    }
+
+    const promptButton = this.createUiButton(
+      this.sys.game.device.input.touch ? 184 : 204,
+      60,
+      this.sys.game.device.input.touch ? 'FETCH!' : 'FETCH! [E]',
+      {
+        fillColor: 0x2f855a,
+        hoverColor: 0x38a169,
+        pressColor: 0x276749,
+        fontSize: '26px',
+        onClick: () => this.requestFetchPickup(),
+        depth: this.UI_DEPTH + 40
+      }
+    );
+    const promptBallIcon = this.add.image(-66, 0, this.fetchConfig.ball.textureKey);
+    promptBallIcon.setScale(this.fetchConfig.ball.hudScale);
+    promptButton.container.add(promptBallIcon);
+    promptButton.text.setX(18);
+    promptButton.container.setVisible(false);
+    this.createScreenButtonZone(promptButton);
+    this.fetchPromptUi = promptButton;
+
+    const hudContainer = this.add.container(0, 0);
+    hudContainer.setScrollFactor(0);
+    hudContainer.setDepth(this.UI_DEPTH + 50);
+    hudContainer.setVisible(false);
+
+    const hudPanel = this.createUiRect(360, 78, 0x111827, 0.88, {
+      strokeThickness: 3,
+      strokeColor: 0xf8fafc,
+      strokeAlpha: 0.45
+    });
+    const hudBadge = this.add.circle(-140, 0, 25, 0xffffff, 0.08);
+    const hudBallIcon = this.add.image(-140, 0, this.fetchConfig.ball.textureKey);
+    hudBallIcon.setScale(this.fetchConfig.ball.hudScale);
+    const hudTitle = this.add.text(-104, 0, 'Ball', {
+      fontSize: '28px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4
+    });
+    hudTitle.setOrigin(0, 0.5);
+
+    const dropButton = this.createUiButton(98, 48, 'DROP', {
+      fillColor: 0x475569,
+      hoverColor: 0x64748b,
+      pressColor: 0x334155,
+      fontSize: '22px',
+      onClick: () => this.dropHeldFetchBall()
+    });
+    const throwButton = this.createUiButton(112, 48, 'THROW', {
+      fillColor: 0x7c2d12,
+      hoverColor: 0x9a3412,
+      pressColor: 0x6b210d,
+      fontSize: '22px',
+      onClick: () => this.openThrowHud()
+    });
+
+    hudContainer.add([
+      hudPanel,
+      hudBadge,
+      hudBallIcon,
+      hudTitle,
+      dropButton.container,
+      throwButton.container
+    ]);
+
+    this.fetchHudUi = {
+      container: hudContainer,
+      panel: hudPanel,
+      badge: hudBadge,
+      ballIcon: hudBallIcon,
+      title: hudTitle,
+      dropButton,
+      throwButton
+    };
+    this.createScreenButtonZone(dropButton);
+    this.createScreenButtonZone(throwButton);
+
+    const throwContainer = this.add.container(0, 0);
+    throwContainer.setScrollFactor(0);
+    throwContainer.setDepth(this.UI_OVERLAY_DEPTH + 10);
+    throwContainer.setVisible(false);
+
+    const scrim = this.createUiRect(this.scale.width, this.scale.height, 0x0b1220, 0.18);
+    const panel = this.createUiRect(560, 520, 0x0b1220, 0.44, {
+      strokeThickness: 2,
+      strokeColor: 0xf8fafc,
+      strokeAlpha: 0.16
+    });
+
+    const glow = this.createUiEllipse(260, 90, 0xffffff, 0.08);
+    const ballImage = this.add.image(0, 0, this.fetchConfig.ball.textureKey);
+    ballImage.setScale(0.06);
+
+    const whichWayText = this.add.text(0, 0, 'Which way?', {
+      fontSize: '36px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#f8fafc',
+      stroke: '#000000',
+      strokeThickness: 6
+    });
+    whichWayText.setOrigin(0.5, 0.5);
+
+    const archLetters = 'FETCH!'.split('').map((character) => {
+      const letterText = this.add.text(0, 0, character, {
+        fontSize: '52px',
+        fontFamily: 'Arial, sans-serif',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 7
+      });
+      letterText.setOrigin(0.5, 0.5);
+      return letterText;
+    });
+
+    const directionButtons = this.fetchConfig.throwDirections.map((direction) => {
+      const directionButton = this.createUiButton(78, 78, direction.emoji, {
+        fillColor: 0x1e293b,
+        hoverColor: 0x334155,
+        pressColor: 0x0f172a,
+        fontSize: '34px',
+        onClick: () => this.throwFetchBallInDirection(direction.x, direction.y)
+      });
+
+      return {
+        direction,
+        button: directionButton
+      };
+    });
+
+    const cancelButton = this.createUiButton(222, 58, 'Nevermind', {
+      fillColor: 0x334155,
+      hoverColor: 0x475569,
+      pressColor: 0x1e293b,
+      fontSize: '24px',
+      onClick: () => this.cancelThrowHud()
+    });
+
+    throwContainer.add([
+      scrim,
+      panel,
+      glow,
+      ballImage,
+      whichWayText,
+      cancelButton.container,
+      ...archLetters,
+      ...directionButtons.map((entry) => entry.button.container)
+    ]);
+
+    this.throwHudUi = {
+      container: throwContainer,
+      scrim,
+      panel,
+      glow,
+      ballImage,
+      whichWayText,
+      archLetters,
+      directionButtons,
+      cancelButton
+    };
+
+    this.layoutFetchUi();
+  }
+
+  layoutFetchUi() {
+    if (!this.fetchPromptUi || !this.fetchHudUi || !this.throwHudUi) {
+      return;
+    }
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const isTouchDevice = this.sys.game.device.input.touch;
+    const minSide = Math.min(width, height);
+
+    const promptY = isTouchDevice ? 146 : 120;
+    this.fetchPromptUi.container.setPosition(width / 2, promptY);
+    this.setScreenButtonPosition(this.fetchPromptUi, width / 2, promptY);
+
+    const titleWidth = this.fetchHudUi.title.width;
+    const badgeDiameter = 50;
+    const iconToTitleGap = 18;
+    const titleToButtonsGap = 32;
+    const buttonGap = 12;
+    const sidePadding = isTouchDevice ? 22 : 30;
+    const maxHudWidth = Math.max(320, width - 32);
+    const minHudWidth = Math.min(maxHudWidth, isTouchDevice ? 360 : 460);
+    const contentWidth = badgeDiameter
+      + iconToTitleGap
+      + titleWidth
+      + titleToButtonsGap
+      + this.fetchHudUi.dropButton.width
+      + buttonGap
+      + this.fetchHudUi.throwButton.width;
+    const hudPanelWidth = Phaser.Math.Clamp(contentWidth + (sidePadding * 2), minHudWidth, maxHudWidth);
+    this.resizeUiRect(this.fetchHudUi.panel, hudPanelWidth, 78);
+    this.fetchHudUi.container.setPosition(
+      width / 2,
+      isTouchDevice ? 82 : 62
+    );
+    const leftEdge = -hudPanelWidth / 2;
+    const rightEdge = hudPanelWidth / 2;
+    this.fetchHudUi.badge.setPosition(leftEdge + sidePadding + (badgeDiameter / 2), 0);
+    this.fetchHudUi.ballIcon.setPosition(this.fetchHudUi.badge.x, 0);
+    this.fetchHudUi.title.setPosition(this.fetchHudUi.badge.x + (badgeDiameter / 2) + iconToTitleGap, 0);
+    const rightInset = sidePadding;
+    const throwX = rightEdge - rightInset - (this.fetchHudUi.throwButton.width / 2);
+    const dropX = throwX
+      - (this.fetchHudUi.throwButton.width / 2)
+      - buttonGap
+      - (this.fetchHudUi.dropButton.width / 2);
+    this.fetchHudUi.dropButton.container.setPosition(dropX, 0);
+    this.fetchHudUi.throwButton.container.setPosition(throwX, 0);
+    this.setScreenButtonPosition(
+      this.fetchHudUi.dropButton,
+      this.fetchHudUi.container.x + dropX,
+      this.fetchHudUi.container.y
+    );
+    this.setScreenButtonPosition(
+      this.fetchHudUi.throwButton,
+      this.fetchHudUi.container.x + throwX,
+      this.fetchHudUi.container.y
+    );
+
+    this.resizeUiRect(this.throwHudUi.scrim, width, height);
+    this.throwHudUi.scrim.setPosition(width / 2, height / 2);
+    this.resizeUiRect(
+      this.throwHudUi.panel,
+      Phaser.Math.Clamp(width * (isTouchDevice ? 0.68 : 0.54), 320, 560),
+      Phaser.Math.Clamp(height * (isTouchDevice ? 0.56 : 0.7), 300, 540)
+    );
+    this.throwHudUi.panel.setPosition(width / 2, height / 2);
+
+    const ballCenterX = width / 2;
+    const ballCenterY = height * (isTouchDevice ? 0.54 : 0.58);
+    const arcBaseY = height * (isTouchDevice ? 0.2 : 0.18);
+    const arcRadiusX = Phaser.Math.Clamp(width * 0.18, 92, 154);
+    const arcRadiusY = Phaser.Math.Clamp(height * 0.06, 26, 54);
+    const directionRadiusX = Phaser.Math.Clamp(width * 0.22, 112, 196);
+    const directionRadiusY = Phaser.Math.Clamp(height * 0.18, 110, 168);
+    const ballScale = Phaser.Math.Clamp(minSide / 9500, 0.05, 0.074);
+
+    this.throwHudUi.glow.setPosition(ballCenterX, ballCenterY + 12);
+    this.resizeUiEllipse(
+      this.throwHudUi.glow,
+      Phaser.Math.Clamp(minSide * 0.42, 180, 340),
+      Phaser.Math.Clamp(minSide * 0.18, 70, 120)
+    );
+
+    this.throwHudUi.ballImage.setPosition(ballCenterX, ballCenterY);
+    this.throwHudUi.ballImage.setScale(ballScale);
+    this.throwHudUi.whichWayText.setPosition(ballCenterX, ballCenterY - directionRadiusY - 72);
+    this.throwHudUi.cancelButton.container.setPosition(ballCenterX, height - (isTouchDevice ? 82 : 64));
+
+    const archAngles = [-1.05, -0.63, -0.21, 0.21, 0.63, 1.05];
+    this.throwHudUi.archLetters.forEach((letterText, index) => {
+      const angle = archAngles[index] || 0;
+      letterText.setPosition(
+        ballCenterX + (Math.sin(angle) * arcRadiusX),
+        arcBaseY - (Math.cos(angle) * arcRadiusY)
+      );
+      letterText.setRotation(angle * 0.35);
+    });
+
+    this.throwHudUi.directionButtons.forEach((entry) => {
+      if (entry.direction.id === 'up') {
+        entry.button.container.setPosition(ballCenterX, ballCenterY - directionRadiusY);
+      } else if (entry.direction.id === 'right') {
+        entry.button.container.setPosition(ballCenterX + directionRadiusX, ballCenterY);
+      } else if (entry.direction.id === 'down') {
+        entry.button.container.setPosition(ballCenterX, ballCenterY + directionRadiusY);
+      } else {
+        entry.button.container.setPosition(ballCenterX - directionRadiusX, ballCenterY);
+      }
+    });
+
+    if (this.throwHudBallTween) {
+      this.throwHudBallTween.stop();
+      this.throwHudBallTween = null;
+    }
+
+    this.throwHudBallTween = this.tweens.add({
+      targets: this.throwHudUi.ballImage,
+      y: ballCenterY - 10,
+      angle: 4,
+      duration: 1200,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: -1
+    });
+
+    this.updateFetchUi();
+  }
+
+  shouldUseLocalFetchAuthority() {
+    return !this.hasReceivedNetworkWorldState;
+  }
+
+  getLocalFetchBallState() {
+    return this.fetchBall?.state || null;
+  }
+
+  getFetchNow() {
+    return Date.now();
+  }
+
+  syncHeldBallOwnershipFlags(holderId) {
+    Object.values(this.players).forEach((playerEntity) => {
+      playerEntity.heldBallId = playerEntity.id === holderId ? this.fetchConfig.ball.id : null;
+    });
+  }
+
+  buildBallCarrierDescriptor(playerEntity) {
+    return {
+      id: playerEntity.id,
+      name: playerEntity.name,
+      x: playerEntity.sprite.x,
+      y: playerEntity.sprite.y,
+      flipX: playerEntity.sprite.flipX,
+      vx: playerEntity.vx || 0,
+      vy: playerEntity.vy || 0
+    };
+  }
+
+  canBallOccupy(worldX, worldY) {
+    if (this.fetchShared?.canBallOccupyPosition) {
+      return this.fetchShared.canBallOccupyPosition(
+        worldX,
+        worldY,
+        (sampleX, sampleY) => this.isBlockedAtWorldPoint(sampleX, sampleY),
+        this.fetchConfig
+      );
+    }
+
+    return this.canPlayerOccupy(worldX, worldY);
+  }
+
+  createOfflineFetchBallState() {
+    if (!this.fetchShared?.findBallSpawnPosition || !this.fetchShared?.createBallState) {
+      return {
+        id: this.fetchConfig.ball.id,
+        x: this.spawnPoint.x + 140,
+        y: this.spawnPoint.y - 90,
+        vx: 0,
+        vy: 0,
+        radius: this.fetchConfig.ball.radius,
+        holderId: null,
+        pickupEnabledAt: 0,
+        lastThrowerId: null,
+        lastThrowerName: null,
+        lastThrownAt: 0
+      };
+    }
+
+    const spawnPoint = this.fetchShared.findBallSpawnPosition({
+      config: this.fetchConfig,
+      worldBounds: this.worldBounds,
+      canOccupy: (candidateX, candidateY) => this.canBallOccupy(candidateX, candidateY),
+      anchorPoint: {
+        x: this.spawnPoint.x,
+        y: this.spawnPoint.y
+      },
+      avoidPoints: [
+        {
+          x: this.spawnPoint.x,
+          y: this.spawnPoint.y,
+          minDistance: this.fetchConfig.spawn.minDistanceFromSpawn
+        }
+      ],
+      fallbackPoint: {
+        x: this.spawnPoint.x + 140,
+        y: this.spawnPoint.y - 90
+      }
+    });
+
+    return this.fetchShared.createBallState(spawnPoint, this.fetchConfig);
+  }
+
+  initializeOfflineFetchBallIfNeeded() {
+    if (!this.fetchBall || this.hasReceivedNetworkWorldState || this.fetchBall.state) {
+      return;
+    }
+
+    const state = this.createOfflineFetchBallState();
+    this.fetchBall.state = state;
+    this.fetchBall.renderX = state.x;
+    this.fetchBall.renderY = state.y;
+    this.fetchBall.targetX = state.x;
+    this.fetchBall.targetY = state.y;
+    this.syncHeldBallOwnershipFlags(null);
+  }
+
+  applyFetchBallSnapshot(snapshot, forceSnap = false) {
+    if (!this.fetchBall) {
+      return;
+    }
+
+    if (!snapshot) {
+      return;
+    }
+
+    const previousHolderId = this.fetchBall.state?.holderId || null;
+    const nextHolderId = snapshot.holderId || null;
+    const shouldSnapPosition = forceSnap || !this.fetchBall.state || previousHolderId !== nextHolderId;
+
+    this.fetchBall.state = {
+      id: snapshot.id || this.fetchConfig.ball.id,
+      x: typeof snapshot.x === 'number' ? snapshot.x : (this.fetchBall.state?.x ?? 0),
+      y: typeof snapshot.y === 'number' ? snapshot.y : (this.fetchBall.state?.y ?? 0),
+      vx: Number.isFinite(snapshot.vx) ? snapshot.vx : 0,
+      vy: Number.isFinite(snapshot.vy) ? snapshot.vy : 0,
+      radius: Number.isFinite(snapshot.radius) ? snapshot.radius : this.fetchConfig.ball.radius,
+      holderId: nextHolderId,
+      pickupEnabledAt: Number.isFinite(snapshot.pickupEnabledAt) ? snapshot.pickupEnabledAt : 0,
+      lastThrowerId: snapshot.lastThrowerId || null,
+      lastThrowerName: snapshot.lastThrowerName || null,
+      lastThrownAt: Number.isFinite(snapshot.lastThrownAt) ? snapshot.lastThrownAt : 0
+    };
+
+    this.fetchBall.targetX = this.fetchBall.state.x;
+    this.fetchBall.targetY = this.fetchBall.state.y;
+
+    if (shouldSnapPosition || !this.fetchBall.sprite.visible) {
+      this.fetchBall.renderX = this.fetchBall.state.x;
+      this.fetchBall.renderY = this.fetchBall.state.y;
+    }
+
+    this.syncHeldBallOwnershipFlags(nextHolderId);
+    this.updateFetchUi();
+  }
+
+  canLocalPlayerInteractWithBall(now = this.getFetchNow()) {
+    const localPlayer = this.getLocalPlayer();
+    const ballState = this.getLocalFetchBallState();
+    if (!localPlayer || !ballState || this.throwHudOpen) {
+      return false;
+    }
+
+    if (ballState.holderId || localPlayer.carId || localPlayer.heldBallId || this.isJumping) {
+      return false;
+    }
+
+    if (Number.isFinite(ballState.pickupEnabledAt) && now < ballState.pickupEnabledAt) {
+      return false;
+    }
+
+    const promptRadius = this.fetchConfig.interaction.promptRadius || 88;
+    return Phaser.Math.Distance.Between(
+      localPlayer.sprite.x,
+      localPlayer.sprite.y,
+      ballState.x,
+      ballState.y
+    ) <= promptRadius;
+  }
+
+  isLocalPlayerHoldingFetchBall() {
+    const localPlayer = this.getLocalPlayer();
+    const ballState = this.getLocalFetchBallState();
+    return Boolean(localPlayer && ballState && ballState.holderId === localPlayer.id);
+  }
+
+  sendFetchAction(actionPayload) {
+    if (!this.hasReceivedNetworkWorldState || !this.network || typeof this.network.sendFetchAction !== 'function') {
+      return false;
+    }
+
+    this.network.sendFetchAction(actionPayload);
+    return true;
+  }
+
+  requestFetchPickup() {
+    const localPlayer = this.getLocalPlayer();
+    const ballState = this.getLocalFetchBallState();
+    if (!localPlayer || !ballState || !this.canLocalPlayerInteractWithBall(this.getFetchNow())) {
+      return;
+    }
+
+    if (this.sendFetchAction({ type: 'pickup' })) {
+      return;
+    }
+
+    const fetchedFromName = ballState.lastThrowerName;
+    const holderDescriptor = this.buildBallCarrierDescriptor(localPlayer);
+
+    ballState.holderId = localPlayer.id;
+    ballState.pickupEnabledAt = 0;
+    if (this.fetchShared?.placeBallAtHolder) {
+      this.fetchShared.placeBallAtHolder(ballState, holderDescriptor, this.fetchConfig);
+    }
+    this.syncHeldBallOwnershipFlags(localPlayer.id);
+
+    if (fetchedFromName) {
+      this.queueTopMessage(`${localPlayer.name} fetched a ball from ${fetchedFromName}!`);
+    }
+
+    ballState.lastThrowerId = null;
+    ballState.lastThrowerName = null;
+    ballState.lastThrownAt = 0;
+    this.updateFetchUi();
+  }
+
+  releaseLocalHeldFetchBall(mode, directionX = 0, directionY = 0) {
+    const localPlayer = this.getLocalPlayer();
+    const ballState = this.getLocalFetchBallState();
+    if (!localPlayer || !ballState || ballState.holderId !== localPlayer.id) {
+      return;
+    }
+
+    const holderDescriptor = this.buildBallCarrierDescriptor(localPlayer);
+
+    if (this.fetchShared?.releaseBallFromHolder) {
+      this.fetchShared.releaseBallFromHolder(
+        ballState,
+        holderDescriptor,
+        this.getFetchNow(),
+        {
+          mode,
+          directionX,
+          directionY
+        },
+        this.fetchConfig
+      );
+    } else {
+      ballState.holderId = null;
+      ballState.x = holderDescriptor.x;
+      ballState.y = holderDescriptor.y;
+      ballState.vx = 0;
+      ballState.vy = 0;
+    }
+
+    if (this.fetchShared?.findNearestBallPosition) {
+      const nearestOpenPosition = this.fetchShared.findNearestBallPosition(
+        ballState.x,
+        ballState.y,
+        (sampleX, sampleY) => this.isBlockedAtWorldPoint(sampleX, sampleY),
+        this.fetchConfig,
+        120,
+        6
+      );
+
+      if (nearestOpenPosition) {
+        ballState.x = nearestOpenPosition.x;
+        ballState.y = nearestOpenPosition.y;
+      }
+    }
+
+    this.fetchBall.renderX = ballState.x;
+    this.fetchBall.renderY = ballState.y;
+    this.fetchBall.targetX = ballState.x;
+    this.fetchBall.targetY = ballState.y;
+    this.syncHeldBallOwnershipFlags(null);
+  }
+
+  dropHeldFetchBall() {
+    if (!this.isLocalPlayerHoldingFetchBall()) {
+      return;
+    }
+
+    if (this.sendFetchAction({ type: 'drop' })) {
+      return;
+    }
+
+    this.releaseLocalHeldFetchBall('drop');
+    this.updateFetchUi();
+  }
+
+  openThrowHud() {
+    if (!this.isLocalPlayerHoldingFetchBall()) {
+      return;
+    }
+
+    this.throwHudOpen = true;
+    this.updateFetchUi();
+  }
+
+  cancelThrowHud() {
+    if (!this.throwHudOpen) {
+      return;
+    }
+
+    this.throwHudOpen = false;
+    this.updateFetchUi();
+  }
+
+  throwFetchBallInDirection(directionX, directionY) {
+    if (!this.isLocalPlayerHoldingFetchBall()) {
+      return;
+    }
+
+    this.throwHudOpen = false;
+
+    if (this.sendFetchAction({
+      type: 'throw',
+      directionX,
+      directionY
+    })) {
+      this.updateFetchUi();
+      return;
+    }
+
+    this.releaseLocalHeldFetchBall('throw', directionX, directionY);
+    this.updateFetchUi();
+  }
+
+  handleThrowHudKeyboardInput() {
+    if (!this.throwHudOpen) {
+      return false;
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
+      this.cancelThrowHud();
+      return true;
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.up) || Phaser.Input.Keyboard.JustDown(this.keys.W)) {
+      this.throwFetchBallInDirection(0, -1);
+      return true;
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.right) || Phaser.Input.Keyboard.JustDown(this.keys.D)) {
+      this.throwFetchBallInDirection(1, 0);
+      return true;
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.down) || Phaser.Input.Keyboard.JustDown(this.keys.S)) {
+      this.throwFetchBallInDirection(0, 1);
+      return true;
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.left) || Phaser.Input.Keyboard.JustDown(this.keys.A)) {
+      this.throwFetchBallInDirection(-1, 0);
+      return true;
+    }
+
+    return false;
+  }
+
+  resolveFetchBallPlayerCollision(ballState, playerEntity) {
+    if (!ballState || !playerEntity?.sprite || playerEntity.carId || ballState.holderId === playerEntity.id) {
+      return;
+    }
+
+    const colliderPosition = this.fetchShared?.getPlayerBallColliderPosition
+      ? this.fetchShared.getPlayerBallColliderPosition(
+        {
+          x: playerEntity.sprite.x,
+          y: playerEntity.sprite.y
+        },
+        this.fetchConfig
+      )
+      : {
+        x: playerEntity.sprite.x,
+        y: playerEntity.sprite.y + this.fetchConfig.physics.playerCollisionOffsetY
+      };
+
+    const collision = this.fetchShared?.resolveBallCircleCollision
+      ? this.fetchShared.resolveBallCircleCollision(
+        ballState,
+        {
+          x: colliderPosition.x,
+          y: colliderPosition.y,
+          radius: this.fetchConfig.physics.playerCollisionRadius,
+          vx: playerEntity.vx || 0,
+          vy: playerEntity.vy || 0
+        },
+        {
+          bounce: this.fetchConfig.physics.playerBounce,
+          velocityTransfer: this.fetchConfig.physics.playerVelocityTransfer
+        },
+        this.fetchConfig
+      )
+      : null;
+
+    if (!collision) {
+      return;
+    }
+
+    const speed = Math.hypot(playerEntity.vx || 0, playerEntity.vy || 0);
+    if (speed < (this.fetchConfig.physics.nudgeSpeedThreshold || 32) || !this.fetchShared?.applyBallImpulse) {
+      return;
+    }
+
+    const direction = this.fetchShared.normalizeVector(
+      playerEntity.vx || 0,
+      playerEntity.vy || 0,
+      collision.normalX,
+      collision.normalY
+    );
+    const impulse = (this.fetchConfig.physics.nudgeImpulse || 210)
+      + Math.min(speed * (this.fetchConfig.physics.nudgeSpeedFactor || 0.12), 120);
+
+    this.fetchShared.applyBallImpulse(
+      ballState,
+      direction.x * impulse,
+      direction.y * impulse,
+      this.fetchConfig
+    );
+  }
+
+  resolveFetchBallCarCollision(ballState, carEntity) {
+    if (!ballState || !carEntity?.sprite || !this.fetchShared?.resolveBallCircleCollision) {
+      return;
+    }
+
+    const definition = this.getCarDefinition(carEntity.id);
+    if (!definition) {
+      return;
+    }
+
+    this.fetchShared.resolveBallCircleCollision(
+      ballState,
+      {
+        x: carEntity.sprite.x,
+        y: carEntity.sprite.y,
+        radius: (definition.physics?.collisionRadius || 70) + (this.fetchConfig.physics.carCollisionPadding || 10),
+        vx: carEntity.vx || 0,
+        vy: carEntity.vy || 0
+      },
+      {
+        bounce: this.fetchConfig.physics.carBounce,
+        velocityTransfer: this.fetchConfig.physics.carVelocityTransfer
+      },
+      this.fetchConfig
+    );
+  }
+
+  updateFetchBallLocalPhysics(delta) {
+    if (!this.shouldUseLocalFetchAuthority()) {
+      return;
+    }
+
+    this.initializeOfflineFetchBallIfNeeded();
+    const ballState = this.getLocalFetchBallState();
+    if (!ballState) {
+      return;
+    }
+
+    if (ballState.holderId) {
+      const holder = this.players[ballState.holderId];
+      if (!holder) {
+        ballState.holderId = null;
+        this.syncHeldBallOwnershipFlags(null);
+        return;
+      }
+
+      if (this.fetchShared?.placeBallAtHolder) {
+        this.fetchShared.placeBallAtHolder(
+          ballState,
+          this.buildBallCarrierDescriptor(holder),
+          this.fetchConfig
+        );
+      }
+
+      this.fetchBall.renderX = ballState.x;
+      this.fetchBall.renderY = ballState.y;
+      return;
+    }
+
+    if (!this.fetchShared?.advanceBall) {
+      return;
+    }
+
+    this.fetchShared.advanceBall(ballState, delta / 1000, {
+      config: this.fetchConfig,
+      worldBounds: this.worldBounds,
+      canOccupy: (candidateX, candidateY) => this.canBallOccupy(candidateX, candidateY),
+      onStep: () => {
+        Object.values(this.cars).forEach((carEntity) => {
+          this.resolveFetchBallCarCollision(ballState, carEntity);
+        });
+
+        Object.values(this.players).forEach((playerEntity) => {
+          this.resolveFetchBallPlayerCollision(ballState, playerEntity);
+        });
+      }
+    });
+
+    this.fetchBall.renderX = ballState.x;
+    this.fetchBall.renderY = ballState.y;
+    this.fetchBall.targetX = ballState.x;
+    this.fetchBall.targetY = ballState.y;
+  }
+
+  interpolateFetchBall(delta) {
+    if (!this.fetchBall?.state || this.shouldUseLocalFetchAuthority() || this.fetchBall.state.holderId) {
+      return;
+    }
+
+    const smoothing = Phaser.Math.Clamp((delta / 1000) * 14, 0, 1);
+    this.fetchBall.renderX = Phaser.Math.Linear(
+      this.fetchBall.renderX ?? this.fetchBall.targetX,
+      this.fetchBall.targetX,
+      smoothing
+    );
+    this.fetchBall.renderY = Phaser.Math.Linear(
+      this.fetchBall.renderY ?? this.fetchBall.targetY,
+      this.fetchBall.targetY,
+      smoothing
+    );
+  }
+
+  updateFetchBallVisuals() {
+    if (!this.fetchBall?.sprite || !this.fetchBall?.shadow) {
+      return;
+    }
+
+    const ballState = this.getLocalFetchBallState();
+    if (!ballState) {
+      this.fetchBall.sprite.setVisible(false);
+      this.fetchBall.shadow.setVisible(false);
+      return;
+    }
+
+    let renderX = this.fetchBall.renderX ?? ballState.x;
+    let renderY = this.fetchBall.renderY ?? ballState.y;
+
+    if (ballState.holderId) {
+      const holder = this.players[ballState.holderId];
+      if (holder) {
+        const heldPosition = this.fetchShared?.getHeldBallPosition
+          ? this.fetchShared.getHeldBallPosition(
+            {
+              x: holder.sprite.x,
+              y: holder.sprite.y,
+              flipX: holder.sprite.flipX
+            },
+            this.fetchConfig
+          )
+          : {
+            x: holder.sprite.x + ((holder.sprite.flipX ? -1 : 1) * this.fetchConfig.ball.holdOffsetX),
+            y: holder.sprite.y + this.fetchConfig.ball.holdOffsetY
+          };
+
+        renderX = heldPosition.x;
+        renderY = heldPosition.y;
+        this.fetchBall.renderX = renderX;
+        this.fetchBall.renderY = renderY;
+      }
+    }
+
+    this.fetchBall.sprite.setVisible(true);
+    this.fetchBall.sprite.setPosition(renderX, renderY);
+    this.fetchBall.sprite.setScale(this.fetchConfig.ball.displayScale);
+
+    if (ballState.holderId) {
+      const frame = this.fetchBall.sprite.frame;
+      const cropWidth = frame?.cutWidth || this.fetchBall.sprite.width;
+      const cropHeight = frame?.cutHeight || this.fetchBall.sprite.height;
+      const cropTop = Math.floor(cropHeight / 3);
+      this.fetchBall.sprite.setCrop(0, cropTop, cropWidth, cropHeight - cropTop);
+      const holder = this.players[ballState.holderId];
+      this.fetchBall.shadow.setVisible(false);
+      this.fetchBall.sprite.setDepth((holder?.sprite?.depth || renderY) + 6);
+      return;
+    }
+
+    this.fetchBall.sprite.setCrop();
+    this.fetchBall.shadow.setVisible(true);
+    this.fetchBall.shadow.setPosition(renderX, renderY + 18);
+    this.fetchBall.shadow.setDepth(renderY + 8);
+    this.fetchBall.sprite.setDepth(renderY + 14);
+  }
+
+  updateFetchUi() {
+    if (!this.fetchPromptUi || !this.fetchHudUi || !this.throwHudUi) {
+      return;
+    }
+
+    const canFetch = this.canLocalPlayerInteractWithBall(this.getFetchNow());
+    const isHoldingBall = this.isLocalPlayerHoldingFetchBall();
+    if (this.throwHudOpen && !isHoldingBall) {
+      this.throwHudOpen = false;
+    }
+    const showOverlay = this.throwHudOpen && isHoldingBall;
+    const showRegularHud = !showOverlay;
+
+    this.fetchPromptUi.container.setVisible(showRegularHud && canFetch);
+    this.fetchHudUi.container.setVisible(showRegularHud && isHoldingBall);
+    this.throwHudUi.container.setVisible(showOverlay);
+    this.syncScreenButtonVisibility(this.fetchPromptUi, showRegularHud && canFetch);
+    this.syncScreenButtonVisibility(this.fetchHudUi.dropButton, showRegularHud && isHoldingBall);
+    this.syncScreenButtonVisibility(this.fetchHudUi.throwButton, showRegularHud && isHoldingBall);
+
+    this.emoteButtonElements.forEach((element) => {
+      element.setVisible(showRegularHud);
+    });
+
+    this.mobileControlElements.forEach((element) => {
+      element.setVisible(showRegularHud);
+    });
+
+    if (this.carExitHintText) {
+      this.carExitHintText.setVisible(showRegularHud);
+    }
+
+    this.layoutTopMessageUi();
+  }
+
   update(time, delta) {
     const localPlayer = this.getLocalPlayer();
     if (!localPlayer) {
@@ -1916,14 +3506,40 @@ class GameScene extends Phaser.Scene {
       this.syncPlayersToCars();
       this.updateTireTracks(time);
       this.interpolateRemotePlayers(delta);
+      this.interpolateFetchBall(delta);
+      this.updateFetchBallVisuals();
       this.updateAllPlayerDecorations();
       this.updateControlModeUi();
+      this.updateFetchUi();
       return;
     }
 
     this.updateMoveVectorFromInput();
     this.interpolateCars(delta);
     this.syncPlayersToCars();
+
+    if (this.throwHudOpen) {
+      this.handleThrowHudKeyboardInput();
+      this.moveVector.set(0, 0);
+      localPlayer.vx = 0;
+      localPlayer.vy = 0;
+      localPlayer.sprite.setVelocity(0, 0);
+      this.playEntityAnimation(localPlayer, 'stand');
+      this.interpolateRemotePlayers(delta);
+      this.syncPlayersToCars();
+      this.updateTireTracks(time);
+      if (this.shouldUseLocalFetchAuthority()) {
+        this.updateFetchBallLocalPhysics(delta);
+      } else {
+        this.interpolateFetchBall(delta);
+      }
+      this.updateFetchBallVisuals();
+      this.updateAllPlayerDecorations();
+      this.updateControlModeUi();
+      this.updateFetchUi();
+      this.sendNetworkInput(time, 'stand');
+      return;
+    }
 
     const jumpPressed = Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.mobileJumpRequested;
 
@@ -1934,12 +3550,17 @@ class GameScene extends Phaser.Scene {
 
       this.mobileJumpRequested = false;
       localPlayer.sprite.setVelocity(0, 0);
+      localPlayer.vx = 0;
+      localPlayer.vy = 0;
 
       this.interpolateRemotePlayers(delta);
       this.syncPlayersToCars();
       this.updateTireTracks(time);
+      this.interpolateFetchBall(delta);
+      this.updateFetchBallVisuals();
       this.updateAllPlayerDecorations();
       this.updateControlModeUi();
+      this.updateFetchUi();
       this.sendNetworkInput(time, 'sit', this.pendingCarExitRequest);
       return;
     }
@@ -2005,18 +3626,47 @@ class GameScene extends Phaser.Scene {
 
       this.mobileJumpRequested = false;
       this.interpolateRemotePlayers(delta);
+      if (this.shouldUseLocalFetchAuthority()) {
+        this.updateFetchBallLocalPhysics(delta);
+      } else {
+        this.interpolateFetchBall(delta);
+      }
+      this.updateFetchBallVisuals();
       this.updateAllPlayerDecorations();
+      this.updateControlModeUi();
+      this.updateFetchUi();
       this.sendNetworkInput(time, 'jump', true);
       return;
     }
     this.mobileJumpRequested = false;
 
     if (this.isJumping) {
+      localPlayer.vx = 0;
+      localPlayer.vy = 0;
       this.updateAllPlayerDecorations();
       this.interpolateRemotePlayers(delta);
       this.updateTireTracks(time);
+      if (this.shouldUseLocalFetchAuthority()) {
+        this.updateFetchBallLocalPhysics(delta);
+      } else {
+        this.interpolateFetchBall(delta);
+      }
+      this.updateFetchBallVisuals();
       this.updateControlModeUi();
+      this.updateFetchUi();
       return;
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+      if (this.isLocalPlayerHoldingFetchBall()) {
+        this.openThrowHud();
+      } else {
+        this.requestFetchPickup();
+      }
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.dropKey)) {
+      this.dropHeldFetchBall();
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.emoteKeys.one)) {
@@ -2035,6 +3685,8 @@ class GameScene extends Phaser.Scene {
 
     localPlayer.sprite.setVelocity(0, 0);
 
+    const previousX = localPlayer.sprite.x;
+    const previousY = localPlayer.sprite.y;
     const isSprinting = this.getIsSprinting() && this.moveVector.lengthSq() > 0;
     const moveSpeed = this.SPEED * (isSprinting ? this.SPRINT_MULTIPLIER : 1);
     const moveStep = moveSpeed * (delta / 1000);
@@ -2071,11 +3723,21 @@ class GameScene extends Phaser.Scene {
     }
 
     this.ensureLocalPlayerOnWalkableGround(localPlayer);
+    const elapsedSeconds = Math.max(delta / 1000, 0.0001);
+    localPlayer.vx = (localPlayer.sprite.x - previousX) / elapsedSeconds;
+    localPlayer.vy = (localPlayer.sprite.y - previousY) / elapsedSeconds;
     this.interpolateRemotePlayers(delta);
     this.syncPlayersToCars();
     this.updateTireTracks(time);
+    if (this.shouldUseLocalFetchAuthority()) {
+      this.updateFetchBallLocalPhysics(delta);
+    } else {
+      this.interpolateFetchBall(delta);
+    }
+    this.updateFetchBallVisuals();
     this.updateAllPlayerDecorations();
     this.updateControlModeUi();
+    this.updateFetchUi();
 
     this.sendNetworkInput(time, isMoving ? (isSprinting ? 'run' : 'walk') : 'stand');
   }
@@ -2089,8 +3751,13 @@ class GameScene extends Phaser.Scene {
       }
 
       if (typeof playerEntity.targetX === 'number' && typeof playerEntity.targetY === 'number') {
+        const previousX = playerEntity.sprite.x;
+        const previousY = playerEntity.sprite.y;
         playerEntity.sprite.x = Phaser.Math.Linear(playerEntity.sprite.x, playerEntity.targetX, smoothing);
         playerEntity.sprite.y = Phaser.Math.Linear(playerEntity.sprite.y, playerEntity.targetY, smoothing);
+        const deltaSeconds = Math.max(delta / 1000, 0.0001);
+        playerEntity.vx = (playerEntity.sprite.x - previousX) / deltaSeconds;
+        playerEntity.vy = (playerEntity.sprite.y - previousY) / deltaSeconds;
       }
     });
   }
@@ -2229,6 +3896,11 @@ class GameScene extends Phaser.Scene {
       this.network.disconnect();
     }
 
+    if (this.fetchUiPointerHandler) {
+      this.input.off('pointerdown', this.fetchUiPointerHandler);
+      this.fetchUiPointerHandler = null;
+    }
+
     Object.keys(this.players).forEach((playerId) => {
       this.removePlayer(playerId);
     });
@@ -2259,6 +3931,49 @@ class GameScene extends Phaser.Scene {
       this.jumpTween.stop();
       this.jumpTween = null;
     }
+
+    if (this.throwHudBallTween) {
+      this.throwHudBallTween.stop();
+      this.throwHudBallTween = null;
+    }
+
+    if (this.topMessageUi?.container) {
+      this.topMessageUi.container.destroy();
+      this.topMessageUi = null;
+    }
+
+    this.destroyScreenButtonZone(this.fetchPromptUi);
+    this.destroyScreenButtonZone(this.fetchHudUi?.dropButton);
+    this.destroyScreenButtonZone(this.fetchHudUi?.throwButton);
+
+    if (this.fetchPromptUi?.container) {
+      this.fetchPromptUi.container.destroy();
+      this.fetchPromptUi = null;
+    }
+
+    if (this.fetchHudUi?.container) {
+      this.fetchHudUi.container.destroy();
+      this.fetchHudUi = null;
+    }
+
+    if (this.throwHudUi?.container) {
+      this.throwHudUi.container.destroy();
+      this.throwHudUi = null;
+    }
+
+    if (this.fetchBall?.sprite) {
+      this.fetchBall.sprite.destroy();
+    }
+
+    if (this.fetchBall?.shadow) {
+      this.fetchBall.shadow.destroy();
+    }
+
+    this.fetchBall = null;
+    this.throwHudOpen = false;
+    this.topMessageQueue = [];
+    this.activeTopMessageTween = null;
+    this.hasReceivedNetworkWorldState = false;
     this.isJumping = false;
   }
 }

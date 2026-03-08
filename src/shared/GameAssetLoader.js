@@ -35,7 +35,7 @@
       });
     }
 
-    function queueGameAssets(scene, worldConfig, racingConfig, dogKeys) {
+    function queueGameAssets(scene, worldConfig, racingConfig, dogKeys, fetchConfig) {
       if (!scene || !worldConfig || !racingConfig) {
         return;
       }
@@ -61,6 +61,14 @@
           definition.requestPath || definition.imagePath
         );
       });
+
+      if (fetchConfig?.ball?.textureKey && (fetchConfig.ball.requestPath || fetchConfig.ball.imagePath)) {
+        queueImage(
+          scene,
+          fetchConfig.ball.textureKey,
+          fetchConfig.ball.requestPath || fetchConfig.ball.imagePath
+        );
+      }
     }
 
     return {
