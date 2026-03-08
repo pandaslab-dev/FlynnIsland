@@ -294,6 +294,7 @@
         pickupEnabledAt: 0,
         lastThrowerId: null,
         lastThrowerName: null,
+        lastThrowSourceType: null,
         lastThrownAt: 0
       };
     }
@@ -423,12 +424,14 @@
         ball.vy += (holder?.vy || 0) * 0.25;
         ball.lastThrowerId = holder?.id || null;
         ball.lastThrowerName = holder?.name || 'Player';
+        ball.lastThrowSourceType = holder?.heldBallSourceType === 'bounce' ? 'bounce' : 'fetch';
         ball.lastThrownAt = now;
       } else {
         ball.vx = (holder?.vx || 0) * 0.08;
         ball.vy = (holder?.vy || 0) * 0.08;
         ball.lastThrowerId = null;
         ball.lastThrowerName = null;
+        ball.lastThrowSourceType = null;
         ball.lastThrownAt = 0;
       }
 

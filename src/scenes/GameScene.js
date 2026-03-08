@@ -2075,6 +2075,54 @@ class GameScene extends Phaser.Scene {
     return !this.hasReceivedNetworkWorldState;
   }
 
+  findTubeExitPosition(tubeX, tubeY) {
+    const islandCenterX = Number.isFinite(this.worldConfig?.islandArt?.centerX)
+      ? this.worldConfig.islandArt.centerX
+      : this.worldBounds.x + (this.worldBounds.width / 2);
+    const islandCenterY = Number.isFinite(this.worldConfig?.islandArt?.centerY)
+      ? this.worldConfig.islandArt.centerY
+      : this.worldBounds.y + (this.worldBounds.height / 2);
+    const inward = this.fetchShared?.normalizeVector
+      ? this.fetchShared.normalizeVector(islandCenterX - tubeX, islandCenterY - tubeY, 0, -1)
+      : new Phaser.Math.Vector2(islandCenterX - tubeX, islandCenterY - tubeY).normalize();
+    const candidateAngles = [0, Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+    const candidateDistances = [112, 156, 208, 268, 336, 408];
+
+    for (const distance of candidateDistances) {
+      for (const angle of candidateAngles) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const directionX = (inward.x * cos) - (inward.y * sin);
+        const directionY = (inward.x * sin) + (inward.y * cos);
+        const candidateX = Phaser.Math.Clamp(
+          tubeX + (directionX * distance),
+          this.worldBounds.x,
+          (this.worldBounds.x + this.worldBounds.width) - 1
+        );
+        const candidateY = Phaser.Math.Clamp(
+          tubeY + (directionY * distance),
+          this.worldBounds.y,
+          (this.worldBounds.y + this.worldBounds.height) - 1
+        );
+        const landing = this.findNearestWalkablePosition(candidateX, candidateY, 120, 6);
+
+        if (landing) {
+          return landing;
+        }
+      }
+    }
+
+    return this.findNearestWalkablePosition(
+      tubeX,
+      tubeY,
+      Math.max((this.lazyRiverConfig.interaction?.exitSearchRadius || 240) * 2, 420),
+      8
+    ) || {
+      x: this.localLastSafePosition.x,
+      y: this.localLastSafePosition.y
+    };
+  }
+
   updateLazyRiverLocalPhysics(delta) {
     if (!this.shouldUseLocalLazyRiverAuthority() || !this.lazyRiverShared?.stepTube) {
       return;
@@ -3683,6 +3731,9 @@ class GameScene extends Phaser.Scene {
   syncHeldBallOwnershipFlags(holderId) {
     Object.values(this.players).forEach((playerEntity) => {
       playerEntity.heldBallId = playerEntity.id === holderId ? this.fetchConfig.ball.id : null;
+      playerEntity.heldBallSourceType = playerEntity.id === holderId
+        ? (playerEntity.heldBallSourceType || 'fetch')
+        : null;
     });
   }
 
@@ -3694,7 +3745,8 @@ class GameScene extends Phaser.Scene {
       y: playerEntity.sprite.y,
       flipX: playerEntity.sprite.flipX,
       vx: playerEntity.vx || 0,
-      vy: playerEntity.vy || 0
+      vy: playerEntity.vy || 0,
+      heldBallSourceType: playerEntity.heldBallSourceType || null
     };
   }
 
@@ -3724,6 +3776,7 @@ class GameScene extends Phaser.Scene {
         pickupEnabledAt: 0,
         lastThrowerId: null,
         lastThrowerName: null,
+        lastThrowSourceType: null,
         lastThrownAt: 0
       };
     }
@@ -3794,6 +3847,7 @@ class GameScene extends Phaser.Scene {
       pickupEnabledAt: Number.isFinite(snapshot.pickupEnabledAt) ? snapshot.pickupEnabledAt : 0,
       lastThrowerId: snapshot.lastThrowerId || null,
       lastThrowerName: snapshot.lastThrowerName || null,
+      lastThrowSourceType: snapshot.lastThrowSourceType || null,
       lastThrownAt: Number.isFinite(snapshot.lastThrownAt) ? snapshot.lastThrownAt : 0
     };
 
@@ -3983,6 +4037,7 @@ class GameScene extends Phaser.Scene {
     if (this.fetchShared?.placeBallAtHolder) {
       this.fetchShared.placeBallAtHolder(ballState, holderDescriptor, this.fetchConfig);
     }
+    localPlayer.heldBallSourceType = 'fetch';
     this.syncHeldBallOwnershipFlags(localPlayer.id);
 
     if (fetchedFromName) {
@@ -3991,6 +4046,7 @@ class GameScene extends Phaser.Scene {
 
     ballState.lastThrowerId = null;
     ballState.lastThrowerName = null;
+    ballState.lastThrowSourceType = null;
     ballState.lastThrownAt = 0;
     this.updateFetchUi();
   }
@@ -4041,11 +4097,9 @@ class GameScene extends Phaser.Scene {
 
     const tubeEntity = this.tubes[localPlayer.tubeId];
     const exitPosition = tubeEntity
-      ? this.findNearestWalkablePosition(
+      ? this.findTubeExitPosition(
         tubeEntity.sprite.x,
-        tubeEntity.sprite.y,
-        this.lazyRiverConfig.interaction?.exitSearchRadius || 240,
-        this.lazyRiverConfig.interaction?.exitSearchStep || 8
+        tubeEntity.sprite.y
       )
       : null;
 
@@ -4250,6 +4304,36 @@ class GameScene extends Phaser.Scene {
       : null;
 
     if (!collision) {
+      return;
+    }
+
+    if (
+      ballState.lastThrowerId &&
+      ballState.lastThrowerId !== playerEntity.id &&
+      (!Number.isFinite(ballState.pickupEnabledAt) || this.getFetchNow() >= ballState.pickupEnabledAt)
+    ) {
+      const fetchedFromName = ballState.lastThrowerName;
+      const bounceNoun = (ballState.lastThrowSourceType || 'fetch') === 'bounce' ? 'ball' : 'fetch';
+      ballState.holderId = playerEntity.id;
+      ballState.pickupEnabledAt = 0;
+      ballState.lastThrownAt = 0;
+      if (this.fetchShared?.placeBallAtHolder) {
+        this.fetchShared.placeBallAtHolder(ballState, this.buildBallCarrierDescriptor(playerEntity), this.fetchConfig);
+      }
+      playerEntity.heldBallSourceType = 'bounce';
+      this.fetchBall.renderX = ballState.x;
+      this.fetchBall.renderY = ballState.y;
+      this.fetchBall.targetX = ballState.x;
+      this.fetchBall.targetY = ballState.y;
+      this.syncHeldBallOwnershipFlags(playerEntity.id);
+
+      if (fetchedFromName) {
+        this.queueTopMessage(`${playerEntity.name} bounced a ${bounceNoun} from ${fetchedFromName}!`);
+      }
+
+      ballState.lastThrowerId = null;
+      ballState.lastThrowerName = null;
+      ballState.lastThrowSourceType = null;
       return;
     }
 

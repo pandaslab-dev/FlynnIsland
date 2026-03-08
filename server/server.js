@@ -50,6 +50,12 @@ const LAZY_RIVER_TUBE_MAP = new Map(LAZY_RIVER_TUBE_DEFINITIONS.map((definition)
 
 const WORLD_WIDTH = WORLD_BOUNDS.width;
 const WORLD_HEIGHT = WORLD_BOUNDS.height;
+const ISLAND_CENTER_X = Number.isFinite(worldConfig.islandArt?.centerX)
+  ? worldConfig.islandArt.centerX
+  : WORLD_BOUNDS.x + (WORLD_WIDTH / 2);
+const ISLAND_CENTER_Y = Number.isFinite(worldConfig.islandArt?.centerY)
+  ? worldConfig.islandArt.centerY
+  : WORLD_BOUNDS.y + (WORLD_HEIGHT / 2);
 const SPAWN_X = SPAWN_POINT.x;
 const SPAWN_Y = SPAWN_POINT.y;
 const PLAYER_COLLISION_RADIUS = 18;
@@ -645,9 +651,10 @@ function emitUiMessage(text, durationMs = 2300) {
   });
 }
 
-function syncFetchBallOwnership(holderId) {
+function syncFetchBallOwnership(holderId, heldBallSourceType = null) {
   Object.values(players).forEach((player) => {
     player.heldBallId = player.id === holderId ? fetchConfig.ball.id : null;
+    player.heldBallSourceType = player.id === holderId ? heldBallSourceType : null;
   });
 
   if (fetchBall) {
@@ -671,6 +678,7 @@ function serializeFetchBall(ball) {
     pickupEnabledAt: ball.pickupEnabledAt || 0,
     lastThrowerId: ball.lastThrowerId || null,
     lastThrowerName: ball.lastThrowerName || null,
+    lastThrowSourceType: ball.lastThrowSourceType || null,
     lastThrownAt: ball.lastThrownAt || 0
   };
 }
@@ -692,7 +700,7 @@ function releaseFetchBallHeldByPlayer(player, now, options = {}) {
   return true;
 }
 
-function pickupFetchBall(player, now) {
+function claimFetchBall(player, now, pickupType = 'fetch') {
   if (
     !player ||
     player.tubeId ||
@@ -703,18 +711,47 @@ function pickupFetchBall(player, now) {
   }
 
   const fetchedFromName = fetchBall.lastThrowerName;
+  const throwSourceType = fetchBall.lastThrowSourceType || 'fetch';
   fetchBall.pickupEnabledAt = 0;
   fetchBall.lastThrownAt = 0;
   fetchShared.placeBallAtHolder(fetchBall, player, fetchConfig);
-  syncFetchBallOwnership(player.id);
+  syncFetchBallOwnership(player.id, pickupType);
 
   if (fetchedFromName) {
-    emitUiMessage(`${player.name} fetched a ball from ${fetchedFromName}!`);
+    if (pickupType === 'bounce') {
+      const bounceNoun = throwSourceType === 'bounce' ? 'ball' : 'fetch';
+      emitUiMessage(`${player.name} bounced a ${bounceNoun} from ${fetchedFromName}!`);
+    } else {
+      emitUiMessage(`${player.name} fetched a ball from ${fetchedFromName}!`);
+    }
   }
 
   fetchBall.lastThrowerId = null;
   fetchBall.lastThrowerName = null;
+  fetchBall.lastThrowSourceType = null;
   return true;
+}
+
+function pickupFetchBall(player, now) {
+  return claimFetchBall(player, now, 'fetch');
+}
+
+function tryConvertBounceToFetch(player, now) {
+  if (
+    !player ||
+    !fetchBall ||
+    fetchBall.holderId ||
+    !fetchBall.lastThrowerId ||
+    fetchBall.lastThrowerId === player.id
+  ) {
+    return false;
+  }
+
+  if (Number.isFinite(fetchBall.pickupEnabledAt) && now < fetchBall.pickupEnabledAt) {
+    return false;
+  }
+
+  return claimFetchBall(player, now, 'bounce');
 }
 
 function handleFetchAction(player, payload = {}, now) {
@@ -750,7 +787,7 @@ function handleFetchAction(player, payload = {}, now) {
   return false;
 }
 
-function resolveFetchBallPlayerCollision(ball, player) {
+function resolveFetchBallPlayerCollision(ball, player, now) {
   if (!ball || !player || player.carId || player.tubeId || ball.holderId === player.id) {
     return;
   }
@@ -773,6 +810,10 @@ function resolveFetchBallPlayerCollision(ball, player) {
   );
 
   if (!collision) {
+    return;
+  }
+
+  if (tryConvertBounceToFetch(player, now)) {
     return;
   }
 
@@ -852,7 +893,7 @@ function updateFetchBall(dtSeconds, now) {
       });
 
       Object.values(players).forEach((player) => {
-        resolveFetchBallPlayerCollision(fetchBall, player);
+        resolveFetchBallPlayerCollision(fetchBall, player, now);
       });
     }
   });
@@ -1029,6 +1070,52 @@ function resolveExitWalkTarget(exitPosition, preferredDirectionX, preferredDirec
   return findNearestWalkablePosition(desiredX, desiredY, 72, 4) || exitPosition;
 }
 
+function findTubeExitPosition(tube) {
+  if (!tube) {
+    return resolveSpawnPoint();
+  }
+
+  const inward = fetchShared.normalizeVector(
+    ISLAND_CENTER_X - tube.x,
+    ISLAND_CENTER_Y - tube.y,
+    0,
+    -1
+  );
+  const candidateAngles = [0, Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+  const candidateDistances = [112, 156, 208, 268, 336, 408];
+
+  for (const distance of candidateDistances) {
+    for (const angle of candidateAngles) {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const directionX = (inward.x * cos) - (inward.y * sin);
+      const directionY = (inward.x * sin) + (inward.y * cos);
+      const candidateX = clamp(
+        tube.x + (directionX * distance),
+        WORLD_BOUNDS.x,
+        (WORLD_BOUNDS.x + WORLD_WIDTH) - 1
+      );
+      const candidateY = clamp(
+        tube.y + (directionY * distance),
+        WORLD_BOUNDS.y,
+        (WORLD_BOUNDS.y + WORLD_HEIGHT) - 1
+      );
+      const landing = findNearestWalkablePosition(candidateX, candidateY, 120, 6);
+
+      if (landing) {
+        return landing;
+      }
+    }
+  }
+
+  return findNearestWalkablePosition(
+    tube.x,
+    tube.y,
+    Math.max((lazyRiverConfig.interaction?.exitSearchRadius || 240) * 2, 420),
+    8
+  ) || resolveSpawnPoint();
+}
+
 function releasePlayerFromCar(player, now) {
   if (!player || !player.carId) {
     return false;
@@ -1187,12 +1274,10 @@ function releasePlayerFromTube(player, now) {
     return false;
   }
 
-  const exitRadius = lazyRiverConfig.interaction?.exitSearchRadius || 240;
-  const exitStep = lazyRiverConfig.interaction?.exitSearchStep || 8;
-  const exitPosition = findNearestWalkablePosition(tube.x, tube.y, exitRadius, exitStep) || {
-    x: player.x,
-    y: player.y
-  };
+  const exitPosition = findTubeExitPosition(tube);
+  const exitDirectionX = exitPosition.x - tube.x;
+  const exitDirectionY = exitPosition.y - tube.y;
+  const exitWalkTarget = resolveExitWalkTarget(exitPosition, exitDirectionX, exitDirectionY);
 
   tube.occupantId = null;
   player.tubeId = null;
@@ -1203,7 +1288,14 @@ function releasePlayerFromTube(player, now) {
   player.y = exitPosition.y;
   player.vx = 0;
   player.vy = 0;
-  player.animation = 'stand';
+  player.animation = 'walk';
+  player.flipX = exitDirectionX < 0;
+  player.exitWalkStartedAt = now;
+  player.exitWalkUntil = now + 260;
+  player.exitWalkStartX = player.x;
+  player.exitWalkStartY = player.y;
+  player.exitWalkTargetX = exitWalkTarget?.x ?? player.x;
+  player.exitWalkTargetY = exitWalkTarget?.y ?? player.y;
   return true;
 }
 
@@ -1495,6 +1587,7 @@ io.on('connection', (socket) => {
       animation: 'stand',
       flipX: false,
       heldBallId: null,
+      heldBallSourceType: null,
       vx: 0,
       vy: 0,
       lastInputAt: Date.now(),
