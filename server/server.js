@@ -9,8 +9,10 @@ const { Server } = require('socket.io');
 const worldConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'IslandWorldConfig.js'));
 const racingConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'RacingConfig.js'));
 const fetchConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'FetchConfig.js'));
+const lazyRiverConfig = require(path.resolve(__dirname, '..', 'src', 'config', 'LazyRiverConfig.js'));
 const fetchShared = require(path.resolve(__dirname, '..', 'src', 'shared', 'FetchShared.js'));
 const racingShared = require(path.resolve(__dirname, '..', 'src', 'shared', 'RacingShared.js'));
+const lazyRiverShared = require(path.resolve(__dirname, '..', 'src', 'shared', 'LazyRiverShared.js'));
 
 const PORT = Number(process.env.PORT) || 3000;
 const TICK_RATE_MS = 33;
@@ -35,8 +37,16 @@ const RACE_TRACK_MASK_CONFIG = racingConfig.trackMask || {
   imagePath: 'misc_assets/racing/racetrack-mask.png',
   blockedColorThreshold: 12
 };
+const LAZY_RIVER_MASK_CONFIG = lazyRiverConfig.mask || {
+  imagePath: 'misc_assets/river.png',
+  offsetX: 0,
+  offsetY: 0,
+  blockedColorThreshold: 12
+};
 const CAR_DEFINITIONS = Array.isArray(racingConfig.cars) ? racingConfig.cars : [];
 const CAR_DEFINITION_MAP = new Map(CAR_DEFINITIONS.map((definition) => [definition.id, definition]));
+const LAZY_RIVER_TUBE_DEFINITIONS = Array.isArray(lazyRiverConfig.tubes) ? lazyRiverConfig.tubes : [];
+const LAZY_RIVER_TUBE_MAP = new Map(LAZY_RIVER_TUBE_DEFINITIONS.map((definition) => [definition.id, definition]));
 
 const WORLD_WIDTH = WORLD_BOUNDS.width;
 const WORLD_HEIGHT = WORLD_BOUNDS.height;
@@ -56,8 +66,12 @@ const BLOCKED_COLOR_THRESHOLD = Number.isFinite(COLLISION_MASK_CONFIG.blockedCol
 const TRACK_DRIVEABLE_THRESHOLD = Number.isFinite(RACE_TRACK_MASK_CONFIG.blockedColorThreshold)
   ? RACE_TRACK_MASK_CONFIG.blockedColorThreshold
   : 12;
+const LAZY_RIVER_DRIVEABLE_THRESHOLD = Number.isFinite(LAZY_RIVER_MASK_CONFIG.blockedColorThreshold)
+  ? LAZY_RIVER_MASK_CONFIG.blockedColorThreshold
+  : 12;
 const ISLAND_MASK_PATH = path.resolve(__dirname, '..', COLLISION_MASK_CONFIG.imagePath);
 const RACE_TRACK_MASK_PATH = path.resolve(__dirname, '..', RACE_TRACK_MASK_CONFIG.imagePath);
+const LAZY_RIVER_MASK_PATH = path.resolve(__dirname, '..', LAZY_RIVER_MASK_CONFIG.imagePath);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const INDEX_HTML_PATH = path.join(ROOT_DIR, 'index.html');
 const INDEX_BUILD_TOKEN = '__BUILD_ID__';
@@ -70,16 +84,23 @@ const BUILD_ID = (
 
 const ALLOWED_DOG_TYPES = new Set(['Alice', 'Remix', 'Sapphire', 'Wendy']);
 const ALLOWED_ANIMATIONS = new Set(['stand', 'walk', 'run', 'jump', 'sit']);
+let lazyRiverPathMetrics = lazyRiverShared.buildPathMetrics(
+  lazyRiverConfig.path?.waypoints || [],
+  lazyRiverConfig.path
+);
 
 const players = {};
 const cars = createInitialCars();
+const tubes = createInitialTubes();
 let fetchBall = null;
 let uiMessageSequence = 0;
 
 let islandMask = null;
 let racetrackMask = null;
+let lazyRiverMask = null;
 let hasWarnedMissingIslandMask = false;
 let hasWarnedMissingTrackMask = false;
+let hasWarnedMissingLazyRiverMask = false;
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -133,7 +154,8 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     playerCount: Object.keys(players).length,
-    occupiedCars: Object.values(cars).filter((car) => Boolean(car.occupantId)).length
+    occupiedCars: Object.values(cars).filter((car) => Boolean(car.occupantId)).length,
+    occupiedTubes: Object.values(tubes).filter((tube) => Boolean(tube.occupantId)).length
   });
 });
 
@@ -217,6 +239,24 @@ function createInitialCars() {
   return carState;
 }
 
+function getLazyRiverTubeDefinition(tubeId) {
+  return LAZY_RIVER_TUBE_MAP.get(tubeId) || null;
+}
+
+function createInitialTubes() {
+  const tubeState = {};
+
+  LAZY_RIVER_TUBE_DEFINITIONS.forEach((definition) => {
+    tubeState[definition.id] = lazyRiverShared.createTubeState(
+      definition,
+      lazyRiverPathMetrics,
+      lazyRiverConfig
+    );
+  });
+
+  return tubeState;
+}
+
 function loadPngMask(maskPath, missingWarning) {
   try {
     const buffer = fs.readFileSync(maskPath);
@@ -258,6 +298,16 @@ function loadRacetrackMask() {
   );
   hasWarnedMissingTrackMask = false;
   resetCarsToTrack();
+}
+
+function loadLazyRiverMask() {
+  lazyRiverMask = loadPngMask(
+    LAZY_RIVER_MASK_PATH,
+    `Lazy river mask load failed at ${LAZY_RIVER_MASK_PATH}; tubes will pause until mask loads.`
+  );
+  hasWarnedMissingLazyRiverMask = false;
+  lazyRiverPathMetrics = resolveLazyRiverPathMetrics();
+  resetTubesToRiverPath();
 }
 
 function isBlockedAtWorldPoint(worldX, worldY) {
@@ -326,6 +376,99 @@ function isDriveableTrackAtWorldPoint(worldX, worldY) {
   }
 
   return r < TRACK_DRIVEABLE_THRESHOLD && g < TRACK_DRIVEABLE_THRESHOLD && b < TRACK_DRIVEABLE_THRESHOLD;
+}
+
+function isLazyRiverAtWorldPoint(worldX, worldY) {
+  if (!lazyRiverMask) {
+    if (!hasWarnedMissingLazyRiverMask) {
+      console.warn('Lazy river mask is unavailable on server; lazy river tubes will remain parked until mask loads.');
+      hasWarnedMissingLazyRiverMask = true;
+    }
+    return false;
+  }
+
+  const pixelX = Math.floor(worldX + (LAZY_RIVER_MASK_CONFIG.offsetX || 0));
+  const pixelY = Math.floor(worldY + (LAZY_RIVER_MASK_CONFIG.offsetY || 0));
+
+  if (
+    pixelX < 0 ||
+    pixelY < 0 ||
+    pixelX >= lazyRiverMask.width ||
+    pixelY >= lazyRiverMask.height
+  ) {
+    return false;
+  }
+
+  const pixelIndex = ((pixelY * lazyRiverMask.width) + pixelX) * 4;
+  const r = lazyRiverMask.data[pixelIndex];
+  const g = lazyRiverMask.data[pixelIndex + 1];
+  const b = lazyRiverMask.data[pixelIndex + 2];
+  const a = lazyRiverMask.data[pixelIndex + 3];
+
+  if (a === 0) {
+    return false;
+  }
+
+  return r < LAZY_RIVER_DRIVEABLE_THRESHOLD
+    && g < LAZY_RIVER_DRIVEABLE_THRESHOLD
+    && b < LAZY_RIVER_DRIVEABLE_THRESHOLD;
+}
+
+function canTubeOccupyAt(worldX, worldY, definition) {
+  return lazyRiverShared.canTubeOccupy(
+    worldX,
+    worldY,
+    lazyRiverConfig,
+    definition,
+    isLazyRiverAtWorldPoint,
+    {
+      worldBounds: WORLD_BOUNDS,
+      allowOutsideWorld: true
+    }
+  );
+}
+
+function findNearestTubePosition(worldX, worldY, definition, options = {}) {
+  const constraintSearchRadius = Number.isFinite(lazyRiverConfig.physics?.constraintSearchRadius)
+    ? lazyRiverConfig.physics.constraintSearchRadius
+    : 220;
+  const constraintSearchStep = Number.isFinite(lazyRiverConfig.physics?.constraintSearchStep)
+    ? lazyRiverConfig.physics.constraintSearchStep
+    : 6;
+
+  return lazyRiverShared.findNearestTubePosition(
+    worldX,
+    worldY,
+    lazyRiverConfig,
+    definition,
+    isLazyRiverAtWorldPoint,
+    {
+      maxRadius: Number.isFinite(options.maxRadius) ? options.maxRadius : constraintSearchRadius,
+      radiusStep: Number.isFinite(options.radiusStep) ? options.radiusStep : constraintSearchStep,
+      worldBounds: WORLD_BOUNDS,
+      allowOutsideWorld: true
+    }
+  );
+}
+
+function resolveLazyRiverPathMetrics() {
+  const rawWaypoints = lazyRiverConfig.path?.waypoints || [];
+  const smoothedWaypoints = lazyRiverShared.buildSmoothedWaypoints
+    ? lazyRiverShared.buildSmoothedWaypoints(rawWaypoints, lazyRiverConfig.path)
+    : rawWaypoints;
+  const resolvedWaypoints = lazyRiverShared.resolvePathWaypoints(
+    smoothedWaypoints,
+    (candidateX, candidateY) => canTubeOccupyAt(candidateX, candidateY, {}),
+    {
+      maxRadius: lazyRiverConfig.path?.waypointSnapRadius,
+      radiusStep: lazyRiverConfig.path?.waypointSnapStep
+    }
+  );
+
+  return lazyRiverShared.buildPathMetrics(
+    resolvedWaypoints,
+    Object.assign({}, lazyRiverConfig.path, { curveSamplesPerSegment: 1 })
+  );
 }
 
 function canPlayerOccupy(worldX, worldY) {
@@ -550,7 +693,12 @@ function releaseFetchBallHeldByPlayer(player, now, options = {}) {
 }
 
 function pickupFetchBall(player, now) {
-  if (!player || !fetchBall || !fetchShared.isBallPickableByPlayer(fetchBall, player, now, fetchConfig)) {
+  if (
+    !player ||
+    player.tubeId ||
+    !fetchBall ||
+    !fetchShared.isBallPickableByPlayer(fetchBall, player, now, fetchConfig)
+  ) {
     return false;
   }
 
@@ -570,7 +718,7 @@ function pickupFetchBall(player, now) {
 }
 
 function handleFetchAction(player, payload = {}, now) {
-  if (!player || !fetchBall) {
+  if (!player || player.tubeId || !fetchBall) {
     return false;
   }
 
@@ -603,7 +751,7 @@ function handleFetchAction(player, payload = {}, now) {
 }
 
 function resolveFetchBallPlayerCollision(ball, player) {
-  if (!ball || !player || player.carId || ball.holderId === player.id) {
+  if (!ball || !player || player.carId || player.tubeId || ball.holderId === player.id) {
     return;
   }
 
@@ -770,8 +918,29 @@ function syncPlayerToCar(player, car) {
   player.flipX = false;
 }
 
+function syncPlayerToTube(player, tube) {
+  const definition = getLazyRiverTubeDefinition(tube.id);
+  if (!definition) {
+    return;
+  }
+
+  const seatPose = lazyRiverShared.computeTubeSeatPose(tube, lazyRiverConfig, definition);
+  player.x = seatPose.x;
+  player.y = seatPose.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.animation = 'sit';
+  player.flipX = false;
+}
+
 function tryBoardAvailableCar(player, now) {
-  if (!player || player.carId || player.heldBallId || now < (player.reboardEnabledAt || 0)) {
+  if (
+    !player ||
+    player.carId ||
+    player.tubeId ||
+    player.heldBallId ||
+    now < (player.reboardEnabledAt || 0)
+  ) {
     return false;
   }
 
@@ -952,6 +1121,158 @@ function releasePlayerFromCar(player, now) {
   return true;
 }
 
+function tryBoardAvailableTube(player, now) {
+  if (
+    !player ||
+    player.carId ||
+    player.tubeId ||
+    player.heldBallId ||
+    now < (player.tubeReboardEnabledAt || 0)
+  ) {
+    return false;
+  }
+
+  let bestCandidate = null;
+  let bestDistanceSq = Number.POSITIVE_INFINITY;
+  const boardRadius = lazyRiverConfig.interaction?.boardRadius || 122;
+
+  Object.values(tubes).forEach((tube) => {
+    if (!tube || tube.occupantId) {
+      return;
+    }
+
+    if (
+      player.lastExitedTubeId &&
+      tube.id === player.lastExitedTubeId &&
+      now < (player.lastExitedTubeUntil || 0)
+    ) {
+      return;
+    }
+
+    const dx = player.x - tube.x;
+    const dy = player.y - tube.y;
+    const distanceSq = (dx * dx) + (dy * dy);
+
+    if (distanceSq > (boardRadius * boardRadius) || distanceSq >= bestDistanceSq) {
+      return;
+    }
+
+    bestCandidate = tube;
+    bestDistanceSq = distanceSq;
+  });
+
+  if (!bestCandidate) {
+    return false;
+  }
+
+  player.tubeId = bestCandidate.id;
+  player.animation = 'sit';
+  player.flipX = false;
+  player.lastExitedTubeId = null;
+  player.lastExitedTubeUntil = 0;
+  bestCandidate.occupantId = player.id;
+  syncPlayerToTube(player, bestCandidate);
+  return true;
+}
+
+function releasePlayerFromTube(player, now) {
+  if (!player || !player.tubeId) {
+    return false;
+  }
+
+  const tube = tubes[player.tubeId];
+  const previousTubeId = player.tubeId;
+  if (!tube) {
+    player.tubeId = null;
+    return false;
+  }
+
+  const exitRadius = lazyRiverConfig.interaction?.exitSearchRadius || 240;
+  const exitStep = lazyRiverConfig.interaction?.exitSearchStep || 8;
+  const exitPosition = findNearestWalkablePosition(tube.x, tube.y, exitRadius, exitStep) || {
+    x: player.x,
+    y: player.y
+  };
+
+  tube.occupantId = null;
+  player.tubeId = null;
+  player.tubeReboardEnabledAt = now + 900;
+  player.lastExitedTubeId = previousTubeId;
+  player.lastExitedTubeUntil = now + 1600;
+  player.x = exitPosition.x;
+  player.y = exitPosition.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.animation = 'stand';
+  return true;
+}
+
+function resetTubesToRiverPath() {
+  Object.values(tubes).forEach((tube) => {
+    const definition = getLazyRiverTubeDefinition(tube.id);
+    if (!definition) {
+      return;
+    }
+
+    const pose = lazyRiverShared.computeTubePose(
+      tube.progress || definition.spawnProgress || 0,
+      lazyRiverPathMetrics,
+      lazyRiverConfig,
+      definition
+    );
+    tube.x = pose.x;
+    tube.y = pose.y;
+    tube.angle = pose.angle;
+    tube.tangentAngle = pose.tangentAngle;
+
+    const constrainedPosition = findNearestTubePosition(tube.x, tube.y, definition, {
+      maxRadius: lazyRiverConfig.physics?.constraintSearchRadius,
+      radiusStep: lazyRiverConfig.physics?.constraintSearchStep
+    });
+    if (constrainedPosition) {
+      tube.x = constrainedPosition.x;
+      tube.y = constrainedPosition.y;
+    }
+
+    const occupant = tube.occupantId ? players[tube.occupantId] : null;
+    if (occupant) {
+      syncPlayerToTube(occupant, tube);
+    }
+  });
+}
+
+function updateLazyRiver(dtSeconds) {
+  Object.values(tubes).forEach((tube) => {
+    if (!tube) {
+      return;
+    }
+
+    const definition = getLazyRiverTubeDefinition(tube.id);
+    if (!definition || !lazyRiverMask) {
+      return;
+    }
+
+    if (tube.occupantId && !players[tube.occupantId]) {
+      tube.occupantId = null;
+    }
+
+    lazyRiverShared.stepTube(tube, dtSeconds, lazyRiverPathMetrics, lazyRiverConfig, definition);
+    const constrainedPosition = findNearestTubePosition(tube.x, tube.y, definition, {
+      maxRadius: lazyRiverConfig.physics?.constraintSearchRadius,
+      radiusStep: lazyRiverConfig.physics?.constraintSearchStep
+    });
+    if (constrainedPosition) {
+      tube.x = constrainedPosition.x;
+      tube.y = constrainedPosition.y;
+    }
+
+    const occupant = tube.occupantId ? players[tube.occupantId] : null;
+    if (occupant) {
+      syncPlayerToTube(occupant, tube);
+    }
+  });
+}
+
 function sanitizeCarInput(payload = {}) {
   return {
     directionX: clamp(
@@ -1108,10 +1429,11 @@ function serializePlayer(player) {
     dogType: player.dogType,
     x: player.x,
     y: player.y,
-    animation: player.carId ? 'sit' : player.animation,
-    flipX: player.carId ? false : player.flipX,
+    animation: (player.carId || player.tubeId) ? 'sit' : player.animation,
+    flipX: (player.carId || player.tubeId) ? false : player.flipX,
     emote: player.emote,
     carId: player.carId || null,
+    tubeId: player.tubeId || null,
     heldBallId: player.heldBallId || null
   };
 }
@@ -1132,13 +1454,28 @@ function serializeCar(car) {
   };
 }
 
+function serializeTube(tube) {
+  return {
+    id: tube.id,
+    x: tube.x,
+    y: tube.y,
+    angle: tube.angle,
+    progress: tube.progress || 0,
+    occupantId: tube.occupantId || null
+  };
+}
+
 function emitWorldState() {
   const playerSnapshot = Object.values(players).map((player) => serializePlayer(player));
   const carSnapshot = Object.values(cars).map((car) => serializeCar(car));
+  const tubeSnapshot = Object.values(tubes).map((tube) => serializeTube(tube));
 
   io.emit('world:state', {
     players: playerSnapshot,
     cars: carSnapshot,
+    lazyRiver: {
+      tubes: tubeSnapshot
+    },
     fetch: {
       ball: serializeFetchBall(fetchBall)
     }
@@ -1162,6 +1499,7 @@ io.on('connection', (socket) => {
       vy: 0,
       lastInputAt: Date.now(),
       carId: null,
+      tubeId: null,
       carInput: {
         directionX: 0,
         directionY: 0,
@@ -1178,7 +1516,10 @@ io.on('connection', (socket) => {
       exitWalkStartX: spawnPoint.x,
       exitWalkStartY: spawnPoint.y,
       exitWalkTargetX: spawnPoint.x,
-      exitWalkTargetY: spawnPoint.y
+      exitWalkTargetY: spawnPoint.y,
+      tubeReboardEnabledAt: 0,
+      lastExitedTubeId: null,
+      lastExitedTubeUntil: 0
     };
   });
 
@@ -1191,6 +1532,14 @@ io.on('connection', (socket) => {
     const now = Date.now();
     const previousInputAt = player.lastInputAt || now;
     player.lastInputAt = now;
+
+    if (player.tubeId) {
+      player.animation = 'sit';
+      player.flipX = false;
+      player.vx = 0;
+      player.vy = 0;
+      return;
+    }
 
     if (player.carId) {
       player.carInput = sanitizeCarInput(payload);
@@ -1279,10 +1628,33 @@ io.on('connection', (socket) => {
     handleFetchAction(player, payload, Date.now());
   });
 
+  socket.on('lazyRiver:action', (payload = {}) => {
+    const player = players[socket.id];
+    if (!player) {
+      return;
+    }
+
+    const now = Date.now();
+    const actionType = typeof payload.type === 'string' ? payload.type : '';
+
+    if (actionType === 'board') {
+      tryBoardAvailableTube(player, now);
+      return;
+    }
+
+    if (actionType === 'exit') {
+      releasePlayerFromTube(player, now);
+    }
+  });
+
   socket.on('disconnect', () => {
     const player = players[socket.id];
     if (player?.carId && cars[player.carId]) {
       cars[player.carId].occupantId = null;
+    }
+
+    if (player?.tubeId && tubes[player.tubeId]) {
+      tubes[player.tubeId].occupantId = null;
     }
 
     if (player?.heldBallId === fetchConfig.ball.id) {
@@ -1298,10 +1670,11 @@ setInterval(() => {
   const dtSeconds = TICK_RATE_MS / 1000;
 
   updateCars(dtSeconds, now);
+  updateLazyRiver(dtSeconds, now);
   updateFetchBall(dtSeconds, now);
 
   Object.values(players).forEach((player) => {
-    if (!player.carId) {
+    if (!player.carId && !player.tubeId) {
       tryBoardAvailableCar(player, now);
     }
   });
@@ -1317,6 +1690,7 @@ setInterval(() => {
 
 loadIslandMask();
 loadRacetrackMask();
+loadLazyRiverMask();
 fetchBall = createInitialFetchBall();
 
 fs.watchFile(ISLAND_MASK_PATH, { interval: 1000 }, (current, previous) => {
@@ -1335,6 +1709,15 @@ fs.watchFile(RACE_TRACK_MASK_PATH, { interval: 1000 }, (current, previous) => {
 
   loadRacetrackMask();
   console.log('Reloaded racetrack collision mask.');
+});
+
+fs.watchFile(LAZY_RIVER_MASK_PATH, { interval: 1000 }, (current, previous) => {
+  if (current.mtimeMs === previous.mtimeMs) {
+    return;
+  }
+
+  loadLazyRiverMask();
+  console.log('Reloaded lazy river mask.');
 });
 
 server.listen(PORT, () => {

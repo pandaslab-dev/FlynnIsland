@@ -99,6 +99,118 @@ const FALLBACK_RACING_CONFIG = Object.freeze({
   ])
 });
 
+const FALLBACK_LAZY_RIVER_CONFIG = Object.freeze({
+  mask: Object.freeze({
+    textureKey: 'lazy_river_mask',
+    imagePath: 'misc_assets/river.png',
+    requestPath: 'misc_assets/river.png',
+    offsetX: 0,
+    offsetY: 0,
+    blockedColorThreshold: 12
+  }),
+  tubes: Object.freeze([
+    Object.freeze({
+      id: 'tube-1',
+      textureKey: 'lazy_river_tube_1',
+      imagePath: 'misc_assets/tube1.png',
+      requestPath: 'misc_assets/tube1.png',
+      spawnProgress: 0
+    }),
+    Object.freeze({
+      id: 'tube-2',
+      textureKey: 'lazy_river_tube_2',
+      imagePath: 'misc_assets/tube2.png',
+      requestPath: 'misc_assets/tube2.png',
+      spawnProgress: 0.065
+    }),
+    Object.freeze({
+      id: 'tube-3',
+      textureKey: 'lazy_river_tube_3',
+      imagePath: 'misc_assets/tube3.png',
+      requestPath: 'misc_assets/tube3.png',
+      spawnProgress: 0.13
+    }),
+    Object.freeze({
+      id: 'tube-4',
+      textureKey: 'lazy_river_tube_4',
+      imagePath: 'misc_assets/tube4.png',
+      requestPath: 'misc_assets/tube4.png',
+      spawnProgress: 0.195
+    })
+  ]),
+  display: Object.freeze({
+    scale: 0.27,
+    depthOffset: 18,
+    shadowOffsetY: 24,
+    shadowWidth: 136,
+    shadowHeight: 40,
+    shadowAlpha: 0.18,
+    pathRotationInfluence: 0.16,
+    wobbleAngle: 0.06,
+    wobbleCycles: 7,
+    collisionRadius: 60,
+    shorePadding: 20,
+    probePointCount: 18
+  }),
+  rider: Object.freeze({
+    offsetX: 0,
+    offsetY: -16,
+    scale: 0.128,
+    originX: 0.5,
+    originY: 0.9,
+    cropTopRatio: 0,
+    cropBottomRatio: 0,
+    rotationInfluence: 0.35
+  }),
+  occlusionZones: Object.freeze([
+    Object.freeze({
+      type: 'ellipse',
+      x: 2000,
+      y: 1490,
+      radiusX: 212,
+      radiusY: 94
+    })
+  ]),
+  interaction: Object.freeze({
+    boardRadius: 164,
+    exitSearchRadius: 240,
+    exitSearchStep: 8,
+    promptRadius: 184
+  }),
+  physics: Object.freeze({
+    speed: 84,
+    constraintSearchRadius: 220,
+    constraintSearchStep: 6
+  }),
+  path: Object.freeze({
+    waypointSnapRadius: 220,
+    waypointSnapStep: 6,
+    curveSamplesPerSegment: 10,
+    waypoints: Object.freeze([
+      Object.freeze({ x: 244, y: 1412 }),
+      Object.freeze({ x: 768, y: 1330 }),
+      Object.freeze({ x: 1472, y: 1350 }),
+      Object.freeze({ x: 2210, y: 1460 }),
+      Object.freeze({ x: 3116, y: 1602 }),
+      Object.freeze({ x: 3840, y: 1690 }),
+      Object.freeze({ x: 4084, y: 2088 }),
+      Object.freeze({ x: 4122, y: 2728 }),
+      Object.freeze({ x: 4042, y: 3398 }),
+      Object.freeze({ x: 3654, y: 3898 }),
+      Object.freeze({ x: 2876, y: 4028 }),
+      Object.freeze({ x: 2018, y: 4044 }),
+      Object.freeze({ x: 1170, y: 4004 }),
+      Object.freeze({ x: 402, y: 3928 }),
+      Object.freeze({ x: -94, y: 3684 }),
+      Object.freeze({ x: -118, y: 3312 }),
+      Object.freeze({ x: -54, y: 2884 }),
+      Object.freeze({ x: 6, y: 2448 }),
+      Object.freeze({ x: 34, y: 1986 }),
+      Object.freeze({ x: 168, y: 1486 })
+    ])
+  })
+});
+
 function getIslandWorldConfig() {
   if (window.FlynnIslandWorldConfig && window.FlynnIslandWorldConfig.worldBounds) {
     return window.FlynnIslandWorldConfig;
@@ -134,6 +246,22 @@ function getFetchConfig() {
 function getFetchShared() {
   if (window.FlynnFetchShared) {
     return window.FlynnFetchShared;
+  }
+
+  return null;
+}
+
+function getLazyRiverConfig() {
+  if (window.FlynnLazyRiverConfig && Array.isArray(window.FlynnLazyRiverConfig.tubes)) {
+    return window.FlynnLazyRiverConfig;
+  }
+
+  return FALLBACK_LAZY_RIVER_CONFIG;
+}
+
+function getLazyRiverShared() {
+  if (window.FlynnLazyRiverShared) {
+    return window.FlynnLazyRiverShared;
   }
 
   return null;
@@ -213,8 +341,12 @@ class GameScene extends Phaser.Scene {
     this.racingShared = getRacingShared();
     this.fetchConfig = getFetchConfig();
     this.fetchShared = getFetchShared();
+    this.lazyRiverConfig = getLazyRiverConfig();
+    this.lazyRiverShared = getLazyRiverShared();
     this.carDefinitions = Array.isArray(this.racingConfig.cars) ? this.racingConfig.cars : [];
     this.carDefinitionMap = new Map(this.carDefinitions.map((definition) => [definition.id, definition]));
+    this.tubeDefinitions = Array.isArray(this.lazyRiverConfig.tubes) ? this.lazyRiverConfig.tubes : [];
+    this.tubeDefinitionMap = new Map(this.tubeDefinitions.map((definition) => [definition.id, definition]));
     this.spawnPoint = {
       x: this.worldConfig.spawn.x,
       y: this.worldConfig.spawn.y
@@ -230,7 +362,14 @@ class GameScene extends Phaser.Scene {
     this.islandMaskPixels = null;
     this.islandMaskWidth = 0;
     this.islandMaskHeight = 0;
+    this.lazyRiverMaskPixels = null;
+    this.lazyRiverMaskWidth = 0;
+    this.lazyRiverMaskHeight = 0;
     this.cars = {};
+    this.tubes = {};
+    this.lazyRiverPathMetrics = this.lazyRiverShared?.buildPathMetrics
+      ? this.lazyRiverShared.buildPathMetrics(this.lazyRiverConfig.path?.waypoints || [], this.lazyRiverConfig.path)
+      : null;
     this.tireTrackGraphics = null;
     this.tireTrackSegments = [];
     this.carExitHintText = null;
@@ -242,10 +381,13 @@ class GameScene extends Phaser.Scene {
     this.throwHudOpen = false;
     this.throwHudBallTween = null;
     this.fetchUiPointerHandler = null;
+    this.lazyRiverPromptUi = null;
+    this.lazyRiverExitUi = null;
     this.topMessageUi = null;
     this.topMessageQueue = [];
     this.activeTopMessageTween = null;
     this.hasReceivedNetworkWorldState = false;
+    this.hasWarnedMissingLazyRiverMask = false;
 
     this.playerData = {
       name: 'Player',
@@ -274,7 +416,8 @@ class GameScene extends Phaser.Scene {
         this.worldConfig,
         this.racingConfig,
         this.DOG_KEYS,
-        this.fetchConfig
+        this.fetchConfig,
+        this.lazyRiverConfig
       );
       return;
     }
@@ -300,6 +443,18 @@ class GameScene extends Phaser.Scene {
       this.fetchConfig.ball.textureKey,
       this.fetchConfig.ball.requestPath || this.fetchConfig.ball.imagePath
     );
+
+    this.load.image(
+      this.lazyRiverConfig.mask.textureKey,
+      this.lazyRiverConfig.mask.requestPath || this.lazyRiverConfig.mask.imagePath
+    );
+
+    this.tubeDefinitions.forEach((definition) => {
+      this.load.image(
+        definition.textureKey,
+        definition.requestPath || definition.imagePath
+      );
+    });
   }
 
   create() {
@@ -327,7 +482,10 @@ class GameScene extends Phaser.Scene {
 
     this.createDogAnimations();
     this.buildIslandCollisionMask();
+    this.buildLazyRiverMask();
+    this.resolveLazyRiverPathMetrics();
     this.createRacingEntities();
+    this.createLazyRiverEntities();
     this.spawnPoint = this.resolveInitialSpawnPoint();
     this.localLastSafePosition = {
       x: this.spawnPoint.x,
@@ -370,8 +528,12 @@ class GameScene extends Phaser.Scene {
     this.createEmoteButtons();
     this.createMobileControls();
     this.createFetchSystems();
+    this.createLazyRiverSystems();
     this.updateControlModeUi();
     this.updateCarExitHintPosition();
+    this.updateFetchUi();
+    this.updateLazyRiverUi();
+    this.updateGlobalUiVisibility();
 
     this.resizeHandler = () => this.handleViewportResize();
     this.scale.on('resize', this.resizeHandler);
@@ -396,15 +558,15 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  buildIslandCollisionMask() {
-    const maskTexture = this.textures.get(this.worldConfig.collisionMask.textureKey);
-    if (!maskTexture) {
-      return;
+  readTexturePixels(textureKey) {
+    const texture = this.textures.get(textureKey);
+    if (!texture) {
+      return null;
     }
 
-    const sourceImage = maskTexture.getSourceImage();
+    const sourceImage = texture.getSourceImage();
     if (!sourceImage || !sourceImage.width || !sourceImage.height) {
-      return;
+      return null;
     }
 
     const canvas = document.createElement('canvas');
@@ -413,16 +575,65 @@ class GameScene extends Phaser.Scene {
 
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) {
-      return;
+      return null;
     }
 
     ctx.drawImage(sourceImage, 0, 0);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    this.islandMaskPixels = imageData.data;
-    this.islandMaskWidth = canvas.width;
-    this.islandMaskHeight = canvas.height;
+    return {
+      pixels: imageData.data,
+      width: canvas.width,
+      height: canvas.height
+    };
+  }
+
+  buildIslandCollisionMask() {
+    const maskData = this.readTexturePixels(this.worldConfig.collisionMask.textureKey);
+    if (!maskData) {
+      return;
+    }
+
+    this.islandMaskPixels = maskData.pixels;
+    this.islandMaskWidth = maskData.width;
+    this.islandMaskHeight = maskData.height;
     this.hasWarnedMissingIslandMask = false;
+  }
+
+  buildLazyRiverMask() {
+    const maskData = this.readTexturePixels(this.lazyRiverConfig.mask.textureKey);
+    if (!maskData) {
+      return;
+    }
+
+    this.lazyRiverMaskPixels = maskData.pixels;
+    this.lazyRiverMaskWidth = maskData.width;
+    this.lazyRiverMaskHeight = maskData.height;
+    this.hasWarnedMissingLazyRiverMask = false;
+  }
+
+  resolveLazyRiverPathMetrics() {
+    if (!this.lazyRiverShared?.resolvePathWaypoints || !this.lazyRiverShared?.buildPathMetrics) {
+      return;
+    }
+
+    const rawWaypoints = this.lazyRiverConfig.path?.waypoints || [];
+    const smoothedWaypoints = this.lazyRiverShared.buildSmoothedWaypoints
+      ? this.lazyRiverShared.buildSmoothedWaypoints(rawWaypoints, this.lazyRiverConfig.path)
+      : rawWaypoints;
+    const resolvedWaypoints = this.lazyRiverShared.resolvePathWaypoints(
+      smoothedWaypoints,
+      (candidateX, candidateY) => this.canTubeOccupy(candidateX, candidateY),
+      {
+        maxRadius: this.lazyRiverConfig.path?.waypointSnapRadius,
+        radiusStep: this.lazyRiverConfig.path?.waypointSnapStep
+      }
+    );
+
+    this.lazyRiverPathMetrics = this.lazyRiverShared.buildPathMetrics(
+      resolvedWaypoints,
+      Object.assign({}, this.lazyRiverConfig.path, { curveSamplesPerSegment: 1 })
+    );
   }
 
   resolveInitialSpawnPoint() {
@@ -473,6 +684,86 @@ class GameScene extends Phaser.Scene {
 
     const blockedColorThreshold = this.worldConfig.collisionMask.blockedColorThreshold;
     return r < blockedColorThreshold && g < blockedColorThreshold && b < blockedColorThreshold;
+  }
+
+  isLazyRiverAtWorldPoint(worldX, worldY) {
+    if (!this.lazyRiverMaskPixels) {
+      if (!this.hasWarnedMissingLazyRiverMask) {
+        console.warn('Lazy river mask is unavailable on client; lazy river tubes will remain parked until the mask is loaded.');
+        this.hasWarnedMissingLazyRiverMask = true;
+      }
+      return false;
+    }
+
+    const pixelX = Math.floor(worldX + (this.lazyRiverConfig.mask.offsetX || 0));
+    const pixelY = Math.floor(worldY + (this.lazyRiverConfig.mask.offsetY || 0));
+
+    if (
+      pixelX < 0 ||
+      pixelY < 0 ||
+      pixelX >= this.lazyRiverMaskWidth ||
+      pixelY >= this.lazyRiverMaskHeight
+    ) {
+      return false;
+    }
+
+    const pixelIndex = ((pixelY * this.lazyRiverMaskWidth) + pixelX) * 4;
+    const r = this.lazyRiverMaskPixels[pixelIndex];
+    const g = this.lazyRiverMaskPixels[pixelIndex + 1];
+    const b = this.lazyRiverMaskPixels[pixelIndex + 2];
+    const a = this.lazyRiverMaskPixels[pixelIndex + 3];
+
+    if (a === 0) {
+      return false;
+    }
+
+    const blockedColorThreshold = this.lazyRiverConfig.mask.blockedColorThreshold || 12;
+    return r < blockedColorThreshold && g < blockedColorThreshold && b < blockedColorThreshold;
+  }
+
+  canTubeOccupy(worldX, worldY, definition = null) {
+    if (this.lazyRiverShared?.canTubeOccupy) {
+      return this.lazyRiverShared.canTubeOccupy(
+        worldX,
+        worldY,
+        this.lazyRiverConfig,
+        definition || {},
+        (sampleX, sampleY) => this.isLazyRiverAtWorldPoint(sampleX, sampleY),
+        {
+          worldBounds: this.worldBounds,
+          allowOutsideWorld: true
+        }
+      );
+    }
+
+    return this.isLazyRiverAtWorldPoint(worldX, worldY);
+  }
+
+  findNearestTubePosition(worldX, worldY, definition = null, options = {}) {
+    if (!this.lazyRiverShared?.findNearestTubePosition) {
+      return this.canTubeOccupy(worldX, worldY, definition || {}) ? { x: worldX, y: worldY } : null;
+    }
+
+    const constraintSearchRadius = Number.isFinite(this.lazyRiverConfig.physics?.constraintSearchRadius)
+      ? this.lazyRiverConfig.physics.constraintSearchRadius
+      : 220;
+    const constraintSearchStep = Number.isFinite(this.lazyRiverConfig.physics?.constraintSearchStep)
+      ? this.lazyRiverConfig.physics.constraintSearchStep
+      : 6;
+
+    return this.lazyRiverShared.findNearestTubePosition(
+      worldX,
+      worldY,
+      this.lazyRiverConfig,
+      definition || {},
+      (sampleX, sampleY) => this.isLazyRiverAtWorldPoint(sampleX, sampleY),
+      {
+        maxRadius: Number.isFinite(options.maxRadius) ? options.maxRadius : constraintSearchRadius,
+        radiusStep: Number.isFinite(options.radiusStep) ? options.radiusStep : constraintSearchStep,
+        worldBounds: this.worldBounds,
+        allowOutsideWorld: true
+      }
+    );
   }
 
   canPlayerOccupy(worldX, worldY) {
@@ -677,8 +968,168 @@ class GameScene extends Phaser.Scene {
     return this.carDefinitionMap.get(carId) || null;
   }
 
+  getTubeDefinition(tubeId) {
+    return this.tubeDefinitionMap.get(tubeId) || null;
+  }
+
   getCarRenderAngle(angle = 0) {
     return Phaser.Math.Angle.Wrap(angle + Math.PI);
+  }
+
+  isTubeOccludedByBridge(worldX, worldY) {
+    const zones = Array.isArray(this.lazyRiverConfig.occlusionZones)
+      ? this.lazyRiverConfig.occlusionZones
+      : [];
+
+    for (const zone of zones) {
+      if (!zone) {
+        continue;
+      }
+
+      if (zone.type === 'ellipse') {
+        const radiusX = Math.max(zone.radiusX || 0, 1);
+        const radiusY = Math.max(zone.radiusY || 0, 1);
+        const normalizedX = (worldX - zone.x) / radiusX;
+        const normalizedY = (worldY - zone.y) / radiusY;
+        if (((normalizedX * normalizedX) + (normalizedY * normalizedY)) <= 1) {
+          return true;
+        }
+      } else if (zone.type === 'rect') {
+        const halfWidth = (zone.width || 0) / 2;
+        const halfHeight = (zone.height || 0) / 2;
+        if (
+          worldX >= (zone.x - halfWidth) &&
+          worldX <= (zone.x + halfWidth) &&
+          worldY >= (zone.y - halfHeight) &&
+          worldY <= (zone.y + halfHeight)
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  createInitialTubeSnapshot(definition) {
+    if (this.lazyRiverShared?.createTubeState) {
+      const snapshot = this.lazyRiverShared.createTubeState(
+        definition,
+        this.lazyRiverPathMetrics,
+        this.lazyRiverConfig
+      );
+
+      const constrainedPosition = this.findNearestTubePosition(snapshot.x, snapshot.y, definition, {
+        maxRadius: this.lazyRiverConfig.physics?.constraintSearchRadius,
+        radiusStep: this.lazyRiverConfig.physics?.constraintSearchStep
+      });
+      if (constrainedPosition) {
+        snapshot.x = constrainedPosition.x;
+        snapshot.y = constrainedPosition.y;
+      }
+      return snapshot;
+    }
+
+    return {
+      id: definition.id,
+      x: 0,
+      y: 0,
+      angle: 0,
+      progress: definition.spawnProgress || 0,
+      occupantId: null
+    };
+  }
+
+  createLazyRiverEntities() {
+    if (!this.tubeDefinitions.length) {
+      return;
+    }
+
+    this.tubeDefinitions.forEach((definition) => {
+      this.addOrUpdateTube(this.createInitialTubeSnapshot(definition), true);
+    });
+  }
+
+  addOrUpdateTube(snapshot, snapToPosition = false) {
+    if (!snapshot?.id) {
+      return null;
+    }
+
+    const definition = this.getTubeDefinition(snapshot.id);
+    if (!definition) {
+      return null;
+    }
+
+    let tubeEntity = this.tubes[snapshot.id];
+    const initialX = typeof snapshot.x === 'number' ? snapshot.x : 0;
+    const initialY = typeof snapshot.y === 'number' ? snapshot.y : 0;
+    const initialAngle = typeof snapshot.angle === 'number' ? snapshot.angle : 0;
+
+    if (!tubeEntity) {
+      const shadow = this.add.ellipse(
+        initialX,
+        initialY + (this.lazyRiverConfig.display.shadowOffsetY || 24),
+        this.lazyRiverConfig.display.shadowWidth || 116,
+        this.lazyRiverConfig.display.shadowHeight || 34,
+        0x000000,
+        this.lazyRiverConfig.display.shadowAlpha || 0.18
+      );
+      const sprite = this.add.image(initialX, initialY, definition.textureKey);
+      sprite.setScale(this.lazyRiverConfig.display.scale || 0.235);
+      sprite.setRotation(initialAngle);
+
+      tubeEntity = {
+        id: snapshot.id,
+        sprite,
+        shadow,
+        x: initialX,
+        y: initialY,
+        angle: initialAngle,
+        targetX: initialX,
+        targetY: initialY,
+        targetAngle: initialAngle,
+        progress: Number.isFinite(snapshot.progress) ? snapshot.progress : (definition.spawnProgress || 0),
+        targetProgress: Number.isFinite(snapshot.progress) ? snapshot.progress : (definition.spawnProgress || 0),
+        occupantId: snapshot.occupantId || null,
+        occlusionAlpha: 1
+      };
+
+      this.tubes[snapshot.id] = tubeEntity;
+      this.applyTubeTransform(tubeEntity);
+      return tubeEntity;
+    }
+
+    tubeEntity.targetX = typeof snapshot.x === 'number' ? snapshot.x : tubeEntity.targetX;
+    tubeEntity.targetY = typeof snapshot.y === 'number' ? snapshot.y : tubeEntity.targetY;
+    tubeEntity.targetAngle = typeof snapshot.angle === 'number' ? snapshot.angle : tubeEntity.targetAngle;
+    tubeEntity.targetProgress = Number.isFinite(snapshot.progress) ? snapshot.progress : tubeEntity.targetProgress;
+    tubeEntity.occupantId = snapshot.occupantId || null;
+
+    if (snapToPosition) {
+      tubeEntity.sprite.setPosition(tubeEntity.targetX, tubeEntity.targetY);
+      tubeEntity.sprite.setRotation(tubeEntity.targetAngle);
+      tubeEntity.progress = tubeEntity.targetProgress;
+      this.applyTubeTransform(tubeEntity);
+    }
+
+    return tubeEntity;
+  }
+
+  removeTube(tubeId) {
+    const tubeEntity = this.tubes[tubeId];
+    if (!tubeEntity) {
+      return;
+    }
+
+    if (tubeEntity.sprite) {
+      tubeEntity.sprite.destroy();
+    }
+
+    if (tubeEntity.shadow) {
+      tubeEntity.shadow.destroy();
+    }
+
+    delete this.tubes[tubeId];
   }
 
   createRacingEntities() {
@@ -856,7 +1307,11 @@ class GameScene extends Phaser.Scene {
 
   updateControlModeUi() {
     const localPlayer = this.getLocalPlayer();
-    const nextMode = localPlayer && localPlayer.carId ? 'car' : 'foot';
+    const nextMode = localPlayer?.carId
+      ? 'car'
+      : localPlayer?.tubeId
+        ? 'tube'
+        : 'foot';
     this.currentControlMode = nextMode;
 
     if (this.jumpButtonLabel) {
@@ -891,6 +1346,34 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  applyTubeTransform(tubeEntity) {
+    if (!tubeEntity?.sprite || !tubeEntity?.shadow) {
+      return;
+    }
+
+    tubeEntity.x = tubeEntity.sprite.x;
+    tubeEntity.y = tubeEntity.sprite.y;
+    tubeEntity.angle = tubeEntity.sprite.rotation;
+
+    tubeEntity.shadow.setPosition(
+      tubeEntity.sprite.x,
+      tubeEntity.sprite.y + (this.lazyRiverConfig.display.shadowOffsetY || 24)
+    );
+    tubeEntity.shadow.setDepth(tubeEntity.sprite.y + 4);
+    tubeEntity.sprite.setScale(this.lazyRiverConfig.display.scale || 0.235);
+    tubeEntity.sprite.setDepth(tubeEntity.sprite.y + (this.lazyRiverConfig.display.depthOffset || 18));
+    tubeEntity.isOccluded = this.isTubeOccludedByBridge(tubeEntity.sprite.x, tubeEntity.sprite.y);
+    const targetOcclusionAlpha = tubeEntity.isOccluded ? 0 : 1;
+    const currentOcclusionAlpha = Number.isFinite(tubeEntity.occlusionAlpha) ? tubeEntity.occlusionAlpha : 1;
+    tubeEntity.occlusionAlpha = Phaser.Math.Linear(currentOcclusionAlpha, targetOcclusionAlpha, 0.22);
+
+    const isRenderable = tubeEntity.occlusionAlpha > 0.02;
+    tubeEntity.sprite.setAlpha(tubeEntity.occlusionAlpha);
+    tubeEntity.shadow.setAlpha((this.lazyRiverConfig.display.shadowAlpha || 0.18) * tubeEntity.occlusionAlpha);
+    tubeEntity.sprite.setVisible(isRenderable);
+    tubeEntity.shadow.setVisible(isRenderable);
+  }
+
   applyOnFootSpriteState(playerEntity) {
     if (!playerEntity?.sprite) {
       return;
@@ -904,6 +1387,8 @@ class GameScene extends Phaser.Scene {
       playerEntity.currentPose = 'foot';
     }
 
+    playerEntity.sprite.setVisible(true);
+    playerEntity.sprite.setAlpha(1);
     playerEntity.sprite.setDepth(playerEntity.sprite.y + 20);
   }
 
@@ -934,8 +1419,45 @@ class GameScene extends Phaser.Scene {
     playerEntity.sprite.setRotation(seatPose.rotation);
     playerEntity.sprite.setPosition(seatPose.x, seatPose.y);
     playerEntity.sprite.setFlipX(Boolean(definition.seat?.flipX));
+    playerEntity.sprite.setVisible(true);
+    playerEntity.sprite.setAlpha(1);
     playerEntity.sprite.setDepth(carEntity.sprite.depth + 2);
     playerEntity.currentPose = 'car';
+  }
+
+  applyTubeSeatedState(playerEntity, tubeEntity) {
+    if (!playerEntity?.sprite || !tubeEntity?.sprite || !this.lazyRiverShared) {
+      return;
+    }
+
+    const definition = this.getTubeDefinition(tubeEntity.id);
+    if (!definition) {
+      return;
+    }
+
+    const seatPose = this.lazyRiverShared.computeTubeSeatPose(
+      {
+        x: tubeEntity.sprite.x,
+        y: tubeEntity.sprite.y,
+        angle: tubeEntity.sprite.rotation
+      },
+      this.lazyRiverConfig,
+      definition
+    );
+
+    playerEntity.sprite.anims.stop();
+    playerEntity.sprite.setTexture(`${playerEntity.dogKey}_sit`);
+    playerEntity.sprite.setCrop();
+    playerEntity.sprite.setOrigin(seatPose.originX, seatPose.originY);
+    playerEntity.sprite.setScale(seatPose.scale);
+    playerEntity.sprite.setRotation(seatPose.rotation);
+    playerEntity.sprite.setPosition(seatPose.x, seatPose.y);
+    playerEntity.sprite.setFlipX(false);
+    const riderAlpha = Number.isFinite(tubeEntity.occlusionAlpha) ? tubeEntity.occlusionAlpha : 1;
+    playerEntity.sprite.setAlpha(riderAlpha);
+    playerEntity.sprite.setVisible(riderAlpha > 0.02);
+    playerEntity.sprite.setDepth(Math.max(tubeEntity.sprite.depth + 8, tubeEntity.shadow.depth + 12));
+    playerEntity.currentPose = 'tube';
   }
 
   shouldSnapLocalPlayerToSnapshot(playerEntity, snapshot) {
@@ -955,11 +1477,13 @@ class GameScene extends Phaser.Scene {
 
   applyLocalPlayerSnapshot(playerEntity, snapshot) {
     const previousCarId = playerEntity.carId;
+    const previousTubeId = playerEntity.tubeId;
     playerEntity.serverAnimation = typeof snapshot.animation === 'string'
       ? snapshot.animation
       : playerEntity.serverAnimation;
     playerEntity.remoteAnimation = playerEntity.serverAnimation;
     playerEntity.carId = snapshot.carId || null;
+    playerEntity.tubeId = snapshot.tubeId || null;
 
     if (typeof snapshot.x === 'number' && typeof snapshot.y === 'number') {
       playerEntity.serverX = snapshot.x;
@@ -968,15 +1492,21 @@ class GameScene extends Phaser.Scene {
       playerEntity.targetY = snapshot.y;
     }
 
-    if (playerEntity.carId) {
-      if (!previousCarId) {
+    if (playerEntity.carId || playerEntity.tubeId) {
+      if (!previousCarId && playerEntity.carId) {
+        this.showCarExitHint();
+      }
+
+      if (
+        (!previousCarId && playerEntity.carId) ||
+        (!previousTubeId && playerEntity.tubeId)
+      ) {
         if (this.jumpTween) {
           this.jumpTween.stop();
           this.jumpTween = null;
         }
         this.isJumping = false;
         this.pendingCarExitRequest = false;
-        this.showCarExitHint();
       }
 
       if (typeof snapshot.x === 'number' && typeof snapshot.y === 'number') {
@@ -986,7 +1516,7 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (previousCarId && !playerEntity.carId) {
+    if ((previousCarId || previousTubeId) && !playerEntity.carId && !playerEntity.tubeId) {
       this.applyOnFootSpriteState(playerEntity);
     }
 
@@ -1016,6 +1546,7 @@ class GameScene extends Phaser.Scene {
       : playerEntity.remoteAnimation;
     playerEntity.serverAnimation = playerEntity.remoteAnimation;
     playerEntity.carId = snapshot.carId || null;
+    playerEntity.tubeId = snapshot.tubeId || null;
 
     if (typeof snapshot.x === 'number' && typeof snapshot.y === 'number') {
       playerEntity.targetX = snapshot.x;
@@ -1024,7 +1555,7 @@ class GameScene extends Phaser.Scene {
       playerEntity.serverY = snapshot.y;
     }
 
-    if (!playerEntity.carId) {
+    if (!playerEntity.carId && !playerEntity.tubeId) {
       if (typeof snapshot.flipX === 'boolean') {
         playerEntity.sprite.setFlipX(snapshot.flipX);
       }
@@ -1047,7 +1578,17 @@ class GameScene extends Phaser.Scene {
         playerEntity.carId = null;
       }
 
-      if (playerEntity.currentPose === 'car') {
+      if (playerEntity.tubeId) {
+        const tubeEntity = this.tubes[playerEntity.tubeId];
+        if (tubeEntity) {
+          this.applyTubeSeatedState(playerEntity, tubeEntity);
+          return;
+        }
+
+        playerEntity.tubeId = null;
+      }
+
+      if (playerEntity.currentPose === 'car' || playerEntity.currentPose === 'tube') {
         this.playEntityAnimation(
           playerEntity,
           playerEntity.serverAnimation || playerEntity.remoteAnimation || 'stand'
@@ -1129,6 +1670,7 @@ class GameScene extends Phaser.Scene {
         vx: 0,
         vy: 0,
         carId: null,
+        tubeId: null,
         currentPose: 'foot',
         heldBallId: null
       };
@@ -1140,7 +1682,7 @@ class GameScene extends Phaser.Scene {
 
       if (playerEntity.dogKey !== dogKey) {
         playerEntity.dogKey = dogKey;
-        playerEntity.sprite.setTexture(`${dogKey}_${playerEntity.carId ? 'sit' : 'stand'}`);
+        playerEntity.sprite.setTexture(`${dogKey}_${(playerEntity.carId || playerEntity.tubeId) ? 'sit' : 'stand'}`);
       }
 
       if (typeof playerData.x === 'number' && typeof playerData.y === 'number') {
@@ -1153,6 +1695,12 @@ class GameScene extends Phaser.Scene {
 
     playerEntity.isLocal = Boolean(playerData.isLocal);
     playerEntity.heldBallId = playerData.heldBallId || null;
+    if (Object.prototype.hasOwnProperty.call(playerData, 'carId')) {
+      playerEntity.carId = playerData.carId || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(playerData, 'tubeId')) {
+      playerEntity.tubeId = playerData.tubeId || null;
+    }
     playerEntity.dogTypeText.setText(dogLabel);
 
     if (typeof playerData.flipX === 'boolean') {
@@ -1211,10 +1759,16 @@ class GameScene extends Phaser.Scene {
     const carsSnapshot = Array.isArray(worldState?.cars)
       ? worldState.cars
       : [];
+    const tubesSnapshot = Array.isArray(worldState?.lazyRiver?.tubes)
+      ? worldState.lazyRiver.tubes
+      : Array.isArray(worldState?.tubes)
+        ? worldState.tubes
+        : [];
     const ballSnapshot = worldState?.fetch?.ball || worldState?.ball || null;
 
     const activeIds = new Set();
     const activeCarIds = new Set();
+    const activeTubeIds = new Set();
 
     carsSnapshot.forEach((snapshot) => {
       if (!snapshot?.id) {
@@ -1228,6 +1782,21 @@ class GameScene extends Phaser.Scene {
     Object.keys(this.cars).forEach((carId) => {
       if (!activeCarIds.has(carId)) {
         this.removeCar(carId);
+      }
+    });
+
+    tubesSnapshot.forEach((snapshot) => {
+      if (!snapshot?.id) {
+        return;
+      }
+
+      activeTubeIds.add(snapshot.id);
+      this.addOrUpdateTube(snapshot);
+    });
+
+    Object.keys(this.tubes).forEach((tubeId) => {
+      if (!activeTubeIds.has(tubeId)) {
+        this.removeTube(tubeId);
       }
     });
 
@@ -1247,6 +1816,8 @@ class GameScene extends Phaser.Scene {
         y: snapshot.y,
         flipX: snapshot.flipX,
         isLocal: isLocalPlayer,
+        carId: snapshot.carId || null,
+        tubeId: snapshot.tubeId || null,
         snapToPosition: !isLocalPlayer
       });
 
@@ -1347,6 +1918,35 @@ class GameScene extends Phaser.Scene {
       carEntity.vx = Phaser.Math.Linear(carEntity.vx || 0, carEntity.targetVx || 0, smoothing);
       carEntity.vy = Phaser.Math.Linear(carEntity.vy || 0, carEntity.targetVy || 0, smoothing);
       this.applyCarTransform(carEntity);
+    });
+  }
+
+  interpolateTubes(delta) {
+    const smoothing = Phaser.Math.Clamp((delta / 1000) * 8, 0, 1);
+
+    Object.values(this.tubes).forEach((tubeEntity) => {
+      if (!tubeEntity?.sprite || !tubeEntity?.shadow) {
+        return;
+      }
+
+      tubeEntity.sprite.x = Phaser.Math.Linear(tubeEntity.sprite.x, tubeEntity.targetX, smoothing);
+      tubeEntity.sprite.y = Phaser.Math.Linear(tubeEntity.sprite.y, tubeEntity.targetY, smoothing);
+
+      if (this.lazyRiverShared?.normalizeAngle) {
+        const angleDelta = this.lazyRiverShared.normalizeAngle(
+          tubeEntity.targetAngle - tubeEntity.sprite.rotation
+        );
+        tubeEntity.sprite.rotation += (angleDelta * smoothing);
+      } else {
+        tubeEntity.sprite.rotation = tubeEntity.targetAngle;
+      }
+
+      tubeEntity.progress = Phaser.Math.Linear(
+        tubeEntity.progress || tubeEntity.targetProgress || 0,
+        tubeEntity.targetProgress || 0,
+        smoothing
+      );
+      this.applyTubeTransform(tubeEntity);
     });
   }
 
@@ -1469,6 +2069,51 @@ class GameScene extends Phaser.Scene {
     }
 
     return null;
+  }
+
+  shouldUseLocalLazyRiverAuthority() {
+    return !this.hasReceivedNetworkWorldState;
+  }
+
+  updateLazyRiverLocalPhysics(delta) {
+    if (!this.shouldUseLocalLazyRiverAuthority() || !this.lazyRiverShared?.stepTube) {
+      return;
+    }
+
+    Object.values(this.tubes).forEach((tubeEntity) => {
+      const definition = this.getTubeDefinition(tubeEntity.id);
+      if (!definition) {
+        return;
+      }
+
+      this.lazyRiverShared.stepTube(
+        tubeEntity,
+        delta / 1000,
+        this.lazyRiverPathMetrics,
+        this.lazyRiverConfig,
+        definition
+      );
+      const constrainedPosition = this.findNearestTubePosition(tubeEntity.x, tubeEntity.y, definition, {
+        maxRadius: this.lazyRiverConfig.physics?.constraintSearchRadius,
+        radiusStep: this.lazyRiverConfig.physics?.constraintSearchStep
+      });
+      if (constrainedPosition) {
+        tubeEntity.x = constrainedPosition.x;
+        tubeEntity.y = constrainedPosition.y;
+      }
+      tubeEntity.targetX = tubeEntity.x;
+      tubeEntity.targetY = tubeEntity.y;
+      tubeEntity.targetAngle = tubeEntity.angle;
+      tubeEntity.targetProgress = tubeEntity.progress;
+      tubeEntity.sprite.setPosition(tubeEntity.x, tubeEntity.y);
+      tubeEntity.sprite.setRotation(tubeEntity.angle);
+      this.applyTubeTransform(tubeEntity);
+
+      const occupant = tubeEntity.occupantId ? this.players[tubeEntity.occupantId] : null;
+      if (occupant) {
+        this.applyTubeSeatedState(occupant, tubeEntity);
+      }
+    });
   }
 
   ensureLocalPlayerOnWalkableGround(localPlayer) {
@@ -1641,6 +2286,7 @@ class GameScene extends Phaser.Scene {
     this.updateCarExitHintPosition();
     this.layoutTopMessageUi();
     this.layoutFetchUi();
+    this.layoutLazyRiverUi();
 
     if (this.shouldRebuildMobileControls()) {
       this.createMobileControls();
@@ -1648,6 +2294,8 @@ class GameScene extends Phaser.Scene {
 
     this.updateControlModeUi();
     this.updateFetchUi();
+    this.updateLazyRiverUi();
+    this.updateGlobalUiVisibility();
   }
 
   shouldRebuildMobileControls() {
@@ -2063,6 +2711,11 @@ class GameScene extends Phaser.Scene {
     this.updateFetchUi();
   }
 
+  createLazyRiverSystems() {
+    this.createLazyRiverUi();
+    this.updateLazyRiverUi();
+  }
+
   normalizeUiDimension(value, minimum = 2) {
     const rounded = Math.max(minimum, Math.round(value));
     return rounded % 2 === 0 ? rounded : rounded + 1;
@@ -2194,8 +2847,16 @@ class GameScene extends Phaser.Scene {
   }
 
   getTopMessageTargetY() {
+    if (this.lazyRiverExitUi?.container?.visible) {
+      return this.lazyRiverExitUi.container.y + (this.lazyRiverExitUi.height / 2) + 28;
+    }
+
     if (this.fetchHudUi?.container?.visible) {
       return this.fetchHudUi.container.y + ((this.fetchHudUi.panel.uiHeight || 78) / 2) + 34;
+    }
+
+    if (this.lazyRiverPromptUi?.container?.visible) {
+      return this.lazyRiverPromptUi.container.y + (this.lazyRiverPromptUi.height / 2) + 28;
     }
 
     if (this.fetchPromptUi?.container?.visible) {
@@ -2465,6 +3126,8 @@ class GameScene extends Phaser.Scene {
       (!this.throwHudOpen && this.fetchPromptUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.fetchPromptUi))
       || (!this.throwHudOpen && this.fetchHudUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.fetchHudUi?.dropButton, this.fetchHudUi.container))
       || (!this.throwHudOpen && this.fetchHudUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.fetchHudUi?.throwButton, this.fetchHudUi.container))
+      || (!this.throwHudOpen && this.lazyRiverPromptUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.lazyRiverPromptUi))
+      || (this.lazyRiverExitUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.lazyRiverExitUi))
     );
   }
 
@@ -2537,6 +3200,16 @@ class GameScene extends Phaser.Scene {
           return true;
         }
       }
+
+      if (this.lazyRiverPromptUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.lazyRiverPromptUi)) {
+        this.lazyRiverPromptUi.trigger();
+        return true;
+      }
+    }
+
+    if (this.lazyRiverExitUi?.container?.visible && this.isPointerInsideUiButton(pointer, this.lazyRiverExitUi)) {
+      this.lazyRiverExitUi.trigger();
+      return true;
     }
 
     if (this.throwHudOpen && this.throwHudUi?.container?.visible) {
@@ -2919,8 +3592,84 @@ class GameScene extends Phaser.Scene {
     this.updateFetchUi();
   }
 
+  createLazyRiverUi() {
+    this.destroyScreenButtonZone(this.lazyRiverPromptUi);
+    this.destroyScreenButtonZone(this.lazyRiverExitUi);
+
+    if (this.lazyRiverPromptUi?.container) {
+      this.lazyRiverPromptUi.container.destroy();
+    }
+    if (this.lazyRiverExitUi?.container) {
+      this.lazyRiverExitUi.container.destroy();
+    }
+
+    const promptButton = this.createUiButton(
+      this.sys.game.device.input.touch ? 252 : 286,
+      60,
+      this.sys.game.device.input.touch ? 'GO ON TUBE' : 'GO ON TUBE [E]',
+      {
+        fillColor: 0x0f766e,
+        hoverColor: 0x14b8a6,
+        pressColor: 0x115e59,
+        fontSize: '24px',
+        onClick: () => this.requestLazyRiverBoard(),
+        depth: this.UI_DEPTH + 40
+      }
+    );
+    const iconTextureKey = this.tubeDefinitions[0]?.textureKey;
+    if (iconTextureKey && this.textures.exists(iconTextureKey)) {
+      const promptTubeIcon = this.add.image(-96, 0, iconTextureKey);
+      promptTubeIcon.setScale(0.072);
+      promptButton.container.add(promptTubeIcon);
+      promptButton.text.setX(32);
+    }
+    promptButton.container.setVisible(false);
+    this.createScreenButtonZone(promptButton);
+    this.lazyRiverPromptUi = promptButton;
+
+    const exitButton = this.createUiButton(
+      this.sys.game.device.input.touch ? 228 : 252,
+      56,
+      'EXIT LAZY RIVER',
+      {
+        fillColor: 0x7c2d12,
+        hoverColor: 0xea580c,
+        pressColor: 0x9a3412,
+        fontSize: this.sys.game.device.input.touch ? '21px' : '22px',
+        onClick: () => this.exitLazyRiver(),
+        depth: this.UI_DEPTH + 50
+      }
+    );
+    exitButton.container.setVisible(false);
+    this.createScreenButtonZone(exitButton);
+    this.lazyRiverExitUi = exitButton;
+
+    this.layoutLazyRiverUi();
+  }
+
+  layoutLazyRiverUi() {
+    if (!this.lazyRiverPromptUi || !this.lazyRiverExitUi) {
+      return;
+    }
+
+    const width = this.scale.width;
+    const isTouchDevice = this.sys.game.device.input.touch;
+    const promptY = isTouchDevice ? 146 : 120;
+    const exitY = isTouchDevice ? 84 : 62;
+
+    this.lazyRiverPromptUi.container.setPosition(width / 2, promptY);
+    this.setScreenButtonPosition(this.lazyRiverPromptUi, width / 2, promptY);
+
+    this.lazyRiverExitUi.container.setPosition(width / 2, exitY);
+    this.setScreenButtonPosition(this.lazyRiverExitUi, width / 2, exitY);
+  }
+
   shouldUseLocalFetchAuthority() {
     return !this.hasReceivedNetworkWorldState;
+  }
+
+  shouldInitializeOfflineFetchBall() {
+    return !this.network && !this.hasReceivedNetworkWorldState;
   }
 
   getLocalFetchBallState() {
@@ -3004,7 +3753,11 @@ class GameScene extends Phaser.Scene {
   }
 
   initializeOfflineFetchBallIfNeeded() {
-    if (!this.fetchBall || this.hasReceivedNetworkWorldState || this.fetchBall.state) {
+    if (
+      !this.fetchBall ||
+      !this.shouldInitializeOfflineFetchBall() ||
+      this.fetchBall.state
+    ) {
       return;
     }
 
@@ -3056,6 +3809,109 @@ class GameScene extends Phaser.Scene {
     this.updateFetchUi();
   }
 
+  getLocalFetchPromptDistance(now = this.getFetchNow()) {
+    if (!this.canLocalPlayerInteractWithBall(now)) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const localPlayer = this.getLocalPlayer();
+    const ballState = this.getLocalFetchBallState();
+    if (!localPlayer || !ballState) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    return Phaser.Math.Distance.Between(
+      localPlayer.sprite.x,
+      localPlayer.sprite.y,
+      ballState.x,
+      ballState.y
+    );
+  }
+
+  getNearestBoardableTube() {
+    const localPlayer = this.getLocalPlayer();
+    if (
+      !localPlayer ||
+      !localPlayer.sprite ||
+      localPlayer.carId ||
+      localPlayer.tubeId ||
+      localPlayer.heldBallId ||
+      this.isJumping ||
+      this.throwHudOpen ||
+      !this.canPlayerOccupy(localPlayer.sprite.x, localPlayer.sprite.y)
+    ) {
+      return null;
+    }
+
+    let nearestEntry = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    const promptRadius = this.lazyRiverConfig.interaction?.promptRadius || 132;
+
+    Object.values(this.tubes).forEach((tubeEntity) => {
+      if (!tubeEntity?.sprite || tubeEntity.occupantId) {
+        return;
+      }
+
+      const distance = Phaser.Math.Distance.Between(
+        localPlayer.sprite.x,
+        localPlayer.sprite.y,
+        tubeEntity.sprite.x,
+        tubeEntity.sprite.y
+      );
+
+      if (distance > promptRadius || distance >= nearestDistance) {
+        return;
+      }
+
+      nearestDistance = distance;
+      nearestEntry = {
+        tubeEntity,
+        distance
+      };
+    });
+
+    return nearestEntry;
+  }
+
+  getLocalFootInteractionChoice(now = this.getFetchNow()) {
+    const localPlayer = this.getLocalPlayer();
+    if (!localPlayer || localPlayer.carId || localPlayer.tubeId || this.throwHudOpen) {
+      return null;
+    }
+
+    const candidates = [];
+    const fetchDistance = this.getLocalFetchPromptDistance(now);
+    if (Number.isFinite(fetchDistance)) {
+      candidates.push({
+        type: 'fetch',
+        distance: fetchDistance
+      });
+    }
+
+    const tubeEntry = this.getNearestBoardableTube();
+    if (tubeEntry) {
+      candidates.push({
+        type: 'lazyRiver',
+        distance: tubeEntry.distance,
+        tubeEntity: tubeEntry.tubeEntity
+      });
+    }
+
+    if (!candidates.length) {
+      return null;
+    }
+
+    candidates.sort((first, second) => {
+      if (Math.abs(first.distance - second.distance) < 8 && first.type !== second.type) {
+        return first.type === 'lazyRiver' ? -1 : 1;
+      }
+
+      return first.distance - second.distance;
+    });
+
+    return candidates[0];
+  }
+
   canLocalPlayerInteractWithBall(now = this.getFetchNow()) {
     const localPlayer = this.getLocalPlayer();
     const ballState = this.getLocalFetchBallState();
@@ -3063,7 +3919,7 @@ class GameScene extends Phaser.Scene {
       return false;
     }
 
-    if (ballState.holderId || localPlayer.carId || localPlayer.heldBallId || this.isJumping) {
+    if (ballState.holderId || localPlayer.carId || localPlayer.tubeId || localPlayer.heldBallId || this.isJumping) {
       return false;
     }
 
@@ -3092,6 +3948,19 @@ class GameScene extends Phaser.Scene {
     }
 
     this.network.sendFetchAction(actionPayload);
+    return true;
+  }
+
+  sendLazyRiverAction(actionPayload) {
+    if (
+      !this.hasReceivedNetworkWorldState ||
+      !this.network ||
+      typeof this.network.sendLazyRiverAction !== 'function'
+    ) {
+      return false;
+    }
+
+    this.network.sendLazyRiverAction(actionPayload);
     return true;
   }
 
@@ -3124,6 +3993,82 @@ class GameScene extends Phaser.Scene {
     ballState.lastThrowerName = null;
     ballState.lastThrownAt = 0;
     this.updateFetchUi();
+  }
+
+  isLocalPlayerOnTube() {
+    const localPlayer = this.getLocalPlayer();
+    return Boolean(localPlayer?.tubeId);
+  }
+
+  requestLazyRiverBoard() {
+    const localPlayer = this.getLocalPlayer();
+    const tubeEntry = this.getNearestBoardableTube();
+    if (!localPlayer || !tubeEntry?.tubeEntity) {
+      return;
+    }
+
+    if (this.sendLazyRiverAction({ type: 'board' })) {
+      return;
+    }
+
+    if (this.jumpTween) {
+      this.jumpTween.stop();
+      this.jumpTween = null;
+    }
+    this.isJumping = false;
+
+    localPlayer.tubeId = tubeEntry.tubeEntity.id;
+    localPlayer.serverAnimation = 'sit';
+    localPlayer.remoteAnimation = 'sit';
+    localPlayer.vx = 0;
+    localPlayer.vy = 0;
+    tubeEntry.tubeEntity.occupantId = localPlayer.id;
+    this.applyTubeSeatedState(localPlayer, tubeEntry.tubeEntity);
+    this.updateLazyRiverUi();
+    this.updateFetchUi();
+    this.updateGlobalUiVisibility();
+  }
+
+  exitLazyRiver() {
+    const localPlayer = this.getLocalPlayer();
+    if (!localPlayer?.tubeId) {
+      return;
+    }
+
+    if (this.sendLazyRiverAction({ type: 'exit' })) {
+      return;
+    }
+
+    const tubeEntity = this.tubes[localPlayer.tubeId];
+    const exitPosition = tubeEntity
+      ? this.findNearestWalkablePosition(
+        tubeEntity.sprite.x,
+        tubeEntity.sprite.y,
+        this.lazyRiverConfig.interaction?.exitSearchRadius || 240,
+        this.lazyRiverConfig.interaction?.exitSearchStep || 8
+      )
+      : null;
+
+    if (tubeEntity) {
+      tubeEntity.occupantId = null;
+    }
+
+    localPlayer.tubeId = null;
+    localPlayer.serverAnimation = 'stand';
+    localPlayer.remoteAnimation = 'stand';
+    this.applyOnFootSpriteState(localPlayer);
+
+    if (exitPosition) {
+      localPlayer.sprite.setPosition(exitPosition.x, exitPosition.y);
+      localPlayer.targetX = exitPosition.x;
+      localPlayer.targetY = exitPosition.y;
+      this.localLastSafePosition.x = exitPosition.x;
+      this.localLastSafePosition.y = exitPosition.y;
+    }
+
+    this.updateLazyRiverUi();
+    this.updateFetchUi();
+    this.updateGlobalUiVisibility();
   }
 
   releaseLocalHeldFetchBall(mode, directionX = 0, directionY = 0) {
@@ -3263,7 +4208,13 @@ class GameScene extends Phaser.Scene {
   }
 
   resolveFetchBallPlayerCollision(ballState, playerEntity) {
-    if (!ballState || !playerEntity?.sprite || playerEntity.carId || ballState.holderId === playerEntity.id) {
+    if (
+      !ballState ||
+      !playerEntity?.sprite ||
+      playerEntity.carId ||
+      playerEntity.tubeId ||
+      ballState.holderId === playerEntity.id
+    ) {
       return;
     }
 
@@ -3493,7 +4444,8 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    const canFetch = this.canLocalPlayerInteractWithBall(this.getFetchNow());
+    const interactionChoice = this.getLocalFootInteractionChoice(this.getFetchNow());
+    const canFetch = interactionChoice?.type === 'fetch';
     const isHoldingBall = this.isLocalPlayerHoldingFetchBall();
     if (this.throwHudOpen && !isHoldingBall) {
       this.throwHudOpen = false;
@@ -3509,25 +4461,53 @@ class GameScene extends Phaser.Scene {
     this.syncScreenButtonVisibility(this.fetchHudUi.throwButton, showRegularHud && isHoldingBall);
     this.syncScreenButtonVisibility(this.throwHudUi.cancelButton, showOverlay);
 
+    this.layoutTopMessageUi();
+  }
+
+  updateLazyRiverUi() {
+    if (!this.lazyRiverPromptUi || !this.lazyRiverExitUi) {
+      return;
+    }
+
+    const interactionChoice = this.getLocalFootInteractionChoice(this.getFetchNow());
+    const showPrompt = interactionChoice?.type === 'lazyRiver';
+    const showExit = this.isLocalPlayerOnTube();
+
+    this.lazyRiverPromptUi.container.setVisible(showPrompt);
+    this.lazyRiverExitUi.container.setVisible(showExit);
+    this.syncScreenButtonVisibility(this.lazyRiverPromptUi, showPrompt);
+    this.syncScreenButtonVisibility(this.lazyRiverExitUi, showExit);
+    this.layoutTopMessageUi();
+  }
+
+  updateGlobalUiVisibility() {
+    const showFetchOverlay = this.throwHudOpen && this.isLocalPlayerHoldingFetchBall();
+    const isOnTube = this.isLocalPlayerOnTube();
+    const showMobileControls = !showFetchOverlay && !isOnTube;
+
+    if (!showMobileControls) {
+      this.mobileSprintHeld = false;
+      this.resetJoystick();
+    }
+
     this.emoteButtonElements.forEach((element) => {
-      element.setVisible(showRegularHud);
+      element.setVisible(!showFetchOverlay);
     });
 
     this.mobileControlElements.forEach((element) => {
-      element.setVisible(showRegularHud);
+      element.setVisible(showMobileControls);
     });
 
     if (this.carExitHintText) {
-      this.carExitHintText.setVisible(showRegularHud);
+      this.carExitHintText.setVisible(!showFetchOverlay && !isOnTube);
     }
-
-    this.layoutTopMessageUi();
   }
 
   update(time, delta) {
     const localPlayer = this.getLocalPlayer();
     if (!localPlayer) {
       this.interpolateCars(delta);
+      this.interpolateTubes(delta);
       this.syncPlayersToCars();
       this.updateTireTracks(time);
       this.interpolateRemotePlayers(delta);
@@ -3536,11 +4516,18 @@ class GameScene extends Phaser.Scene {
       this.updateAllPlayerDecorations();
       this.updateControlModeUi();
       this.updateFetchUi();
+      this.updateLazyRiverUi();
+      this.updateGlobalUiVisibility();
       return;
     }
 
     this.updateMoveVectorFromInput();
     this.interpolateCars(delta);
+    if (this.shouldUseLocalLazyRiverAuthority()) {
+      this.updateLazyRiverLocalPhysics(delta);
+    } else {
+      this.interpolateTubes(delta);
+    }
     this.syncPlayersToCars();
 
     if (this.throwHudOpen) {
@@ -3562,6 +4549,8 @@ class GameScene extends Phaser.Scene {
       this.updateAllPlayerDecorations();
       this.updateControlModeUi();
       this.updateFetchUi();
+      this.updateLazyRiverUi();
+      this.updateGlobalUiVisibility();
       this.sendNetworkInput(time, 'stand');
       return;
     }
@@ -3586,7 +4575,41 @@ class GameScene extends Phaser.Scene {
       this.updateAllPlayerDecorations();
       this.updateControlModeUi();
       this.updateFetchUi();
+      this.updateLazyRiverUi();
+      this.updateGlobalUiVisibility();
       this.sendNetworkInput(time, 'sit', this.pendingCarExitRequest);
+      return;
+    }
+
+    if (localPlayer.tubeId) {
+      if (
+        jumpPressed ||
+        Phaser.Input.Keyboard.JustDown(this.interactKey) ||
+        Phaser.Input.Keyboard.JustDown(this.escapeKey)
+      ) {
+        this.exitLazyRiver();
+      }
+
+      this.mobileJumpRequested = false;
+      this.moveVector.set(0, 0);
+      localPlayer.sprite.setVelocity(0, 0);
+      localPlayer.vx = 0;
+      localPlayer.vy = 0;
+
+      this.interpolateRemotePlayers(delta);
+      this.syncPlayersToCars();
+      this.updateTireTracks(time);
+      if (this.shouldUseLocalFetchAuthority()) {
+        this.updateFetchBallLocalPhysics(delta);
+      } else {
+        this.interpolateFetchBall(delta);
+      }
+      this.updateFetchBallVisuals();
+      this.updateAllPlayerDecorations();
+      this.updateControlModeUi();
+      this.updateFetchUi();
+      this.updateLazyRiverUi();
+      this.updateGlobalUiVisibility();
       return;
     }
 
@@ -3660,6 +4683,8 @@ class GameScene extends Phaser.Scene {
       this.updateAllPlayerDecorations();
       this.updateControlModeUi();
       this.updateFetchUi();
+      this.updateLazyRiverUi();
+      this.updateGlobalUiVisibility();
       this.sendNetworkInput(time, 'jump', true);
       return;
     }
@@ -3679,12 +4704,16 @@ class GameScene extends Phaser.Scene {
       this.updateFetchBallVisuals();
       this.updateControlModeUi();
       this.updateFetchUi();
+      this.updateLazyRiverUi();
+      this.updateGlobalUiVisibility();
       return;
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.interactKey)) {
       if (this.isLocalPlayerHoldingFetchBall()) {
         this.openThrowHud();
+      } else if (this.getLocalFootInteractionChoice(this.getFetchNow())?.type === 'lazyRiver') {
+        this.requestLazyRiverBoard();
       } else {
         this.requestFetchPickup();
       }
@@ -3763,6 +4792,8 @@ class GameScene extends Phaser.Scene {
     this.updateAllPlayerDecorations();
     this.updateControlModeUi();
     this.updateFetchUi();
+    this.updateLazyRiverUi();
+    this.updateGlobalUiVisibility();
 
     this.sendNetworkInput(time, isMoving ? (isSprinting ? 'run' : 'walk') : 'stand');
   }
@@ -3771,7 +4802,7 @@ class GameScene extends Phaser.Scene {
     const smoothing = Phaser.Math.Clamp((delta / 1000) * 12, 0, 1);
 
     Object.values(this.players).forEach((playerEntity) => {
-      if (playerEntity.isLocal || playerEntity.carId) {
+      if (playerEntity.isLocal || playerEntity.carId || playerEntity.tubeId) {
         return;
       }
 
@@ -3798,6 +4829,10 @@ class GameScene extends Phaser.Scene {
 
     const localPlayer = this.getLocalPlayer();
     if (!localPlayer) {
+      return;
+    }
+
+    if (localPlayer.tubeId) {
       return;
     }
 
@@ -3892,9 +4927,13 @@ class GameScene extends Phaser.Scene {
   }
 
   updatePlayerDecorations(playerEntity) {
-    const isSeated = Boolean(playerEntity.carId);
-    const nameOffset = isSeated ? 118 : 100;
-    const typeOffset = isSeated ? 94 : 75;
+    const isCarSeated = Boolean(playerEntity.carId);
+    const isTubeSeated = Boolean(playerEntity.tubeId);
+    const isSeated = isCarSeated || isTubeSeated;
+    const activeTube = isTubeSeated ? this.tubes[playerEntity.tubeId] : null;
+    const hideDecorations = Boolean(activeTube && (activeTube.occlusionAlpha ?? 1) < 0.2);
+    const nameOffset = isTubeSeated ? 126 : (isCarSeated ? 118 : 100);
+    const typeOffset = isTubeSeated ? 102 : (isCarSeated ? 94 : 75);
 
     if (!isSeated) {
       playerEntity.sprite.setDepth(playerEntity.sprite.y + 20);
@@ -3904,10 +4943,16 @@ class GameScene extends Phaser.Scene {
     playerEntity.dogTypeText.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - typeOffset);
     playerEntity.playerNameText.setDepth(playerEntity.sprite.depth + 20);
     playerEntity.dogTypeText.setDepth(playerEntity.sprite.depth + 21);
+    playerEntity.playerNameText.setVisible(!hideDecorations);
+    playerEntity.dogTypeText.setVisible(!hideDecorations);
 
     if (playerEntity.currentEmote && playerEntity.currentEmote.active && playerEntity.currentEmote.alpha === 1) {
-      playerEntity.currentEmote.setPosition(playerEntity.sprite.x, playerEntity.sprite.y - (isSeated ? 154 : 140));
+      playerEntity.currentEmote.setPosition(
+        playerEntity.sprite.x,
+        playerEntity.sprite.y - (isTubeSeated ? 168 : (isCarSeated ? 154 : 140))
+      );
       playerEntity.currentEmote.setDepth(playerEntity.sprite.depth + 30);
+      playerEntity.currentEmote.setVisible(!hideDecorations);
     }
   }
 
@@ -3934,8 +4979,13 @@ class GameScene extends Phaser.Scene {
       this.removeCar(carId);
     });
 
+    Object.keys(this.tubes).forEach((tubeId) => {
+      this.removeTube(tubeId);
+    });
+
     this.players = {};
     this.cars = {};
+    this.tubes = {};
     this.clearEmoteButtons();
     this.clearMobileControls();
     this.extraPointersAdded = false;
@@ -3971,6 +5021,8 @@ class GameScene extends Phaser.Scene {
     this.destroyScreenButtonZone(this.fetchHudUi?.dropButton);
     this.destroyScreenButtonZone(this.fetchHudUi?.throwButton);
     this.destroyScreenButtonZone(this.throwHudUi?.cancelButton);
+    this.destroyScreenButtonZone(this.lazyRiverPromptUi);
+    this.destroyScreenButtonZone(this.lazyRiverExitUi);
 
     if (this.fetchPromptUi?.container) {
       this.fetchPromptUi.container.destroy();
@@ -3985,6 +5037,16 @@ class GameScene extends Phaser.Scene {
     if (this.throwHudUi?.container) {
       this.throwHudUi.container.destroy();
       this.throwHudUi = null;
+    }
+
+    if (this.lazyRiverPromptUi?.container) {
+      this.lazyRiverPromptUi.container.destroy();
+      this.lazyRiverPromptUi = null;
+    }
+
+    if (this.lazyRiverExitUi?.container) {
+      this.lazyRiverExitUi.container.destroy();
+      this.lazyRiverExitUi = null;
     }
 
     if (this.fetchBall?.sprite) {

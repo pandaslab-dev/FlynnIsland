@@ -35,7 +35,7 @@
       });
     }
 
-    function queueGameAssets(scene, worldConfig, racingConfig, dogKeys, fetchConfig) {
+    function queueGameAssets(scene, worldConfig, racingConfig, dogKeys, fetchConfig, lazyRiverConfig) {
       if (!scene || !worldConfig || !racingConfig) {
         return;
       }
@@ -69,6 +69,27 @@
           fetchConfig.ball.requestPath || fetchConfig.ball.imagePath
         );
       }
+
+      if (lazyRiverConfig?.mask?.textureKey && (lazyRiverConfig.mask.requestPath || lazyRiverConfig.mask.imagePath)) {
+        queueImage(
+          scene,
+          lazyRiverConfig.mask.textureKey,
+          lazyRiverConfig.mask.requestPath || lazyRiverConfig.mask.imagePath
+        );
+      }
+
+      const lazyRiverTubes = Array.isArray(lazyRiverConfig?.tubes) ? lazyRiverConfig.tubes : [];
+      lazyRiverTubes.forEach((definition) => {
+        if (!definition?.textureKey || (!definition.requestPath && !definition.imagePath)) {
+          return;
+        }
+
+        queueImage(
+          scene,
+          definition.textureKey,
+          definition.requestPath || definition.imagePath
+        );
+      });
     }
 
     return {

@@ -95,6 +95,14 @@ class FlynnNetworkBridge {
     this.socket.emit('fetch:action', payload);
   }
 
+  sendLazyRiverAction(payload) {
+    if (!this.socket) {
+      return;
+    }
+
+    this.socket.emit('lazyRiver:action', payload);
+  }
+
   disconnect() {
     if (!this.socket) {
       return;

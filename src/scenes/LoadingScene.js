@@ -31,6 +31,22 @@ function getLoadingRacingConfig() {
   return LOADING_FALLBACK_RACING_CONFIG;
 }
 
+function getLoadingFetchConfig() {
+  if (window.FlynnFetchConfig && window.FlynnFetchConfig.ball) {
+    return window.FlynnFetchConfig;
+  }
+
+  return null;
+}
+
+function getLoadingLazyRiverConfig() {
+  if (window.FlynnLazyRiverConfig && Array.isArray(window.FlynnLazyRiverConfig.tubes)) {
+    return window.FlynnLazyRiverConfig;
+  }
+
+  return null;
+}
+
 class LoadingScene extends Phaser.Scene {
   constructor() {
     super({ key: 'LoadingScene' });
@@ -60,10 +76,19 @@ class LoadingScene extends Phaser.Scene {
 
     const worldConfig = getLoadingWorldConfig();
     const racingConfig = getLoadingRacingConfig();
+    const fetchConfig = getLoadingFetchConfig();
+    const lazyRiverConfig = getLoadingLazyRiverConfig();
     const dogKeys = ['alice', 'remix', 'sapphire', 'wendy'];
 
     if (window.FlynnGameAssetLoader && typeof window.FlynnGameAssetLoader.queueGameAssets === 'function') {
-      window.FlynnGameAssetLoader.queueGameAssets(this, worldConfig, racingConfig, dogKeys);
+      window.FlynnGameAssetLoader.queueGameAssets(
+        this,
+        worldConfig,
+        racingConfig,
+        dogKeys,
+        fetchConfig,
+        lazyRiverConfig
+      );
     }
 
     this.load.on('progress', this.handleLoadProgress, this);
