@@ -46,7 +46,7 @@ const FALLBACK_RACING_CONFIG = Object.freeze({
   })
 });
 
-const FALLBACK_FETCH_CONFIG = Object.freeze({
+  const FALLBACK_FETCH_CONFIG = Object.freeze({
   ball: Object.freeze({
     id: 'island-tennis-ball',
     textureKey: 'tennisball',
@@ -59,10 +59,10 @@ const FALLBACK_FETCH_CONFIG = Object.freeze({
     holdOffsetY: -6,
     dropOffsetY: 12
   }),
-  interaction: Object.freeze({
-    pickupRadius: 88,
-    promptRadius: 88
-  }),
+    interaction: Object.freeze({
+    pickupRadius: 112,
+    promptRadius: 112
+    }),
   spawn: Object.freeze({
     attempts: 84,
     margin: 40,
@@ -2586,6 +2586,7 @@ class GameScene extends Phaser.Scene {
     this.destroyScreenButtonZone(this.fetchPromptUi);
     this.destroyScreenButtonZone(this.fetchHudUi?.dropButton);
     this.destroyScreenButtonZone(this.fetchHudUi?.throwButton);
+    this.destroyScreenButtonZone(this.throwHudUi?.cancelButton);
 
     if (this.fetchPromptUi?.container) {
       this.fetchPromptUi.container.destroy();
@@ -2739,6 +2740,7 @@ class GameScene extends Phaser.Scene {
       fontSize: '24px',
       onClick: () => this.cancelThrowHud()
     });
+    this.createScreenButtonZone(cancelButton);
 
     throwContainer.add([
       scrim,
@@ -2788,41 +2790,58 @@ class GameScene extends Phaser.Scene {
     const sidePadding = isTouchDevice ? 22 : 30;
     const maxHudWidth = Math.max(320, width - 32);
     const minHudWidth = Math.min(maxHudWidth, isTouchDevice ? 360 : 460);
-    const contentWidth = badgeDiameter
-      + iconToTitleGap
-      + titleWidth
-      + titleToButtonsGap
-      + this.fetchHudUi.dropButton.width
-      + buttonGap
-      + this.fetchHudUi.throwButton.width;
+    const titleRowWidth = badgeDiameter + iconToTitleGap + titleWidth;
+    const buttonRowWidth = this.fetchHudUi.dropButton.width + buttonGap + this.fetchHudUi.throwButton.width;
+    const contentWidth = isTouchDevice
+      ? Math.max(titleRowWidth, buttonRowWidth)
+      : titleRowWidth + titleToButtonsGap + buttonRowWidth;
     const hudPanelWidth = Phaser.Math.Clamp(contentWidth + (sidePadding * 2), minHudWidth, maxHudWidth);
-    this.resizeUiRect(this.fetchHudUi.panel, hudPanelWidth, 78);
+    const hudPanelHeight = isTouchDevice ? 108 : 78;
+    this.resizeUiRect(this.fetchHudUi.panel, hudPanelWidth, hudPanelHeight);
     this.fetchHudUi.container.setPosition(
       width / 2,
-      isTouchDevice ? 82 : 62
+      isTouchDevice ? 84 : 62
     );
     const leftEdge = -hudPanelWidth / 2;
     const rightEdge = hudPanelWidth / 2;
-    this.fetchHudUi.badge.setPosition(leftEdge + sidePadding + (badgeDiameter / 2), 0);
-    this.fetchHudUi.ballIcon.setPosition(this.fetchHudUi.badge.x, 0);
-    this.fetchHudUi.title.setPosition(this.fetchHudUi.badge.x + (badgeDiameter / 2) + iconToTitleGap, 0);
-    const rightInset = sidePadding;
-    const throwX = rightEdge - rightInset - (this.fetchHudUi.throwButton.width / 2);
-    const dropX = throwX
-      - (this.fetchHudUi.throwButton.width / 2)
-      - buttonGap
-      - (this.fetchHudUi.dropButton.width / 2);
-    this.fetchHudUi.dropButton.container.setPosition(dropX, 0);
-    this.fetchHudUi.throwButton.container.setPosition(throwX, 0);
+    let dropX;
+    let throwX;
+
+    if (isTouchDevice) {
+      const titleRowStartX = -(titleRowWidth / 2);
+      const buttonRowStartX = -(buttonRowWidth / 2);
+      this.fetchHudUi.badge.setPosition(titleRowStartX + (badgeDiameter / 2), -20);
+      this.fetchHudUi.ballIcon.setPosition(this.fetchHudUi.badge.x, this.fetchHudUi.badge.y);
+      this.fetchHudUi.title.setPosition(this.fetchHudUi.badge.x + (badgeDiameter / 2) + iconToTitleGap, -20);
+      dropX = buttonRowStartX + (this.fetchHudUi.dropButton.width / 2);
+      throwX = dropX
+        + (this.fetchHudUi.dropButton.width / 2)
+        + buttonGap
+        + (this.fetchHudUi.throwButton.width / 2);
+      this.fetchHudUi.dropButton.container.setPosition(dropX, 22);
+      this.fetchHudUi.throwButton.container.setPosition(throwX, 22);
+    } else {
+      this.fetchHudUi.badge.setPosition(leftEdge + sidePadding + (badgeDiameter / 2), 0);
+      this.fetchHudUi.ballIcon.setPosition(this.fetchHudUi.badge.x, 0);
+      this.fetchHudUi.title.setPosition(this.fetchHudUi.badge.x + (badgeDiameter / 2) + iconToTitleGap, 0);
+      const rightInset = sidePadding;
+      throwX = rightEdge - rightInset - (this.fetchHudUi.throwButton.width / 2);
+      dropX = throwX
+        - (this.fetchHudUi.throwButton.width / 2)
+        - buttonGap
+        - (this.fetchHudUi.dropButton.width / 2);
+      this.fetchHudUi.dropButton.container.setPosition(dropX, 0);
+      this.fetchHudUi.throwButton.container.setPosition(throwX, 0);
+    }
     this.setScreenButtonPosition(
       this.fetchHudUi.dropButton,
       this.fetchHudUi.container.x + dropX,
-      this.fetchHudUi.container.y
+      this.fetchHudUi.container.y + this.fetchHudUi.dropButton.container.y
     );
     this.setScreenButtonPosition(
       this.fetchHudUi.throwButton,
       this.fetchHudUi.container.x + throwX,
-      this.fetchHudUi.container.y
+      this.fetchHudUi.container.y + this.fetchHudUi.throwButton.container.y
     );
 
     this.resizeUiRect(this.throwHudUi.scrim, width, height);
@@ -2854,6 +2873,11 @@ class GameScene extends Phaser.Scene {
     this.throwHudUi.ballImage.setScale(ballScale);
     this.throwHudUi.whichWayText.setPosition(ballCenterX, ballCenterY - directionRadiusY - 72);
     this.throwHudUi.cancelButton.container.setPosition(ballCenterX, height - (isTouchDevice ? 82 : 64));
+    this.setScreenButtonPosition(
+      this.throwHudUi.cancelButton,
+      ballCenterX,
+      height - (isTouchDevice ? 82 : 64)
+    );
 
     const archAngles = [-1.05, -0.63, -0.21, 0.21, 0.63, 1.05];
     this.throwHudUi.archLetters.forEach((letterText, index) => {
@@ -3483,6 +3507,7 @@ class GameScene extends Phaser.Scene {
     this.syncScreenButtonVisibility(this.fetchPromptUi, showRegularHud && canFetch);
     this.syncScreenButtonVisibility(this.fetchHudUi.dropButton, showRegularHud && isHoldingBall);
     this.syncScreenButtonVisibility(this.fetchHudUi.throwButton, showRegularHud && isHoldingBall);
+    this.syncScreenButtonVisibility(this.throwHudUi.cancelButton, showOverlay);
 
     this.emoteButtonElements.forEach((element) => {
       element.setVisible(showRegularHud);
@@ -3945,6 +3970,7 @@ class GameScene extends Phaser.Scene {
     this.destroyScreenButtonZone(this.fetchPromptUi);
     this.destroyScreenButtonZone(this.fetchHudUi?.dropButton);
     this.destroyScreenButtonZone(this.fetchHudUi?.throwButton);
+    this.destroyScreenButtonZone(this.throwHudUi?.cancelButton);
 
     if (this.fetchPromptUi?.container) {
       this.fetchPromptUi.container.destroy();

@@ -28,8 +28,8 @@
         dropOffsetY: 12
       }),
       interaction: Object.freeze({
-        pickupRadius: 88,
-        promptRadius: 88
+        pickupRadius: 112,
+        promptRadius: 112
       }),
       spawn: Object.freeze({
         attempts: 84,
