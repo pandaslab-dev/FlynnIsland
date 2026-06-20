@@ -6,7 +6,7 @@ Live demo: [flynnisland.pandaslab.dev](https://flynnisland.pandaslab.dev). It ru
 
 ## Why I built it
 
-I built Flynn Island to explore what a playful real-time social game could look like with a lightweight JavaScript stack. It gave me a way to practice multiplayer state sync, shared client/server game logic, collision systems driven by image masks, and mobile-friendly UI work in a project that still felt fun and personal.
+I built Flynn Island to explore what a playful real-time social game could look like with a lightweight JavaScript stack. It was originally just to create a game to play with my family where you can pick one of our dogs to play as. It gave me a way to practice multiplayer state sync, shared client/server game logic, collision systems driven by image masks, and mobile-friendly UI work in a project that still felt fun and personal.
 
 ## Tech stack
 
@@ -16,6 +16,7 @@ I built Flynn Island to explore what a playful real-time social game could look 
 - Node.js
 - Express
 - Socket.IO
+- Nano Banana
 
 ## Current features
 
@@ -35,6 +36,7 @@ I built Flynn Island to explore what a playful real-time social game could look 
 
 ## What I would improve next
 
+- Organic human art.
 - Add automated tests around shared physics and interaction helpers
 - Add persistence for player identity, cosmetics, and session history
 - Add more island activities, clearer onboarding, and stronger in-game feedback
