@@ -40,8 +40,10 @@ Use Socket.io events with this shape:
 4. Include Socket.io client in `index.html` (or bundle) when server is active.
 5. In `GameScene`, treat server snapshots as source of truth for remote players first, then for local player once prediction/reconciliation is added.
 
-## Hosting Notes (pandaslab.dev)
+## Hosting Notes
 
 - Static-only hosting is not enough for real-time multiplayer.
 - Deploy a long-running Node process for WebSocket connections.
-- Serve Phaser client and Socket.io from the same origin first to avoid CORS complexity.
+- Serve the Phaser client and Socket.io from the same origin first to avoid CORS complexity.
+- The live deployment is available at `https://flynnisland.pandaslab.dev`.
+- It is hosted on a free Render instance, so cold starts can take around 15 seconds before the island finishes loading.

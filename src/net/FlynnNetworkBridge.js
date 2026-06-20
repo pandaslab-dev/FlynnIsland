@@ -23,11 +23,16 @@ class FlynnNetworkBridge {
 
     const isLocalHost =
       window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1';
+      window.location.hostname === '127.0.0.1' ||
+      window.location.protocol === 'file:';
 
-    const socketServerUrl = isLocalHost
+    const configuredSocketServerUrl = typeof window.FlynnSocketServerUrl === 'string'
+      ? window.FlynnSocketServerUrl.trim()
+      : '';
+
+    const socketServerUrl = configuredSocketServerUrl || (isLocalHost
       ? 'http://localhost:3000'
-      : 'https://flynnisland.pandaslab.dev';
+      : window.location.origin);
 
     this.socket = window.io(socketServerUrl);
 

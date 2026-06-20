@@ -4,6 +4,7 @@
   "description": "Basic multiplayer server for Flynn Island",
   "main": "server.js",
   "scripts": {
+    "dev": "node server.js",
     "start": "node server.js"
   },
   "dependencies": {

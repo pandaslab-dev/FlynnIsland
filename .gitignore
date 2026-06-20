@@ -5,9 +5,9 @@
 .vscode/
 .idea/
 
-# Future node_modules (when we add npm later)
+# Node.js dependencies and local environment files
 node_modules/
 .env
 
-# Future server files (when we add Colyseus)
+# Server dependencies
 server/node_modules/
